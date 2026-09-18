@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "org-handbook": {
+      "type": "stdio",
+      "command": "echo",
+      "args": ["placeholder: replace with your organization's MCP server"]
+    }
+  }
+}

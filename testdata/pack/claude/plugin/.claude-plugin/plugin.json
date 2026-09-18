@@ -1,0 +1,8 @@
+{
+  "name": "acme-defaults",
+  "description": "Acme org defaults: skills, commands and standards",
+  "version": "0.1.0",
+  "author": {
+    "name": "Acme"
+  }
+}
