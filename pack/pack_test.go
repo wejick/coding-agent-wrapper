@@ -14,7 +14,7 @@ func TestLoadMissingDir(t *testing.T) {
 }
 
 func TestLoadExamplePack(t *testing.T) {
-	p, err := Load("../testdata/pack", "test")
+	p, err := Load("../examples/pack", "test")
 	if err != nil {
 		t.Fatal(err)
 	}

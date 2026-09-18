@@ -36,7 +36,7 @@ func TestPrepareEndToEnd(t *testing.T) {
 	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
 		Agent: "claude",
 		Args:  []string{"--version"},
-		Pack:  pack.Local("testdata/pack"),
+		Pack:  pack.Local("examples/pack"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +65,7 @@ func TestPrepareUnknownAgent(t *testing.T) {
 	registerAdapter(t)
 	if _, err := wrapper.Prepare(context.Background(), wrapper.Options{
 		Agent: "nope",
-		Pack:  pack.Local("testdata/pack"),
+		Pack:  pack.Local("examples/pack"),
 	}); err == nil || !strings.Contains(err.Error(), "no adapter") {
 		t.Fatalf("expected unknown-adapter error, got %v", err)
 	}
@@ -83,7 +83,7 @@ func TestPrepareFailsWhenBinaryMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir()) // no claude anywhere
 	if _, err := wrapper.Prepare(context.Background(), wrapper.Options{
 		Agent: "claude",
-		Pack:  pack.Local("testdata/pack"),
+		Pack:  pack.Local("examples/pack"),
 	}); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("expected binary-not-found error, got %v", err)
 	}

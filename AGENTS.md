@@ -29,7 +29,7 @@ adapters/claude/
 e2e_test.go            black-box tests: build the wr binary, drive it with a
                        fake agent, pin the exec model and anti-recursion
 cmd/wr/main.go          reference CLI: run, doctor, sync, agents
-testdata/pack/          complete example org pack (also used by tests)
+examples/pack/          complete example org pack (also used by tests)
 docs/
   config-layers.md      the configuration layering model (canonical reference)
   adapters.md           how to add an agent adapter

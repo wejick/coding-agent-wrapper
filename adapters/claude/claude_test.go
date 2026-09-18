@@ -40,7 +40,7 @@ func homeWithUserSettings(t *testing.T, settings string) {
 
 func testPack(t *testing.T) *pack.Pack {
 	t.Helper()
-	p, err := pack.Load("../../testdata/pack", "test")
+	p, err := pack.Load("../../examples/pack", "test")
 	if err != nil {
 		t.Fatal(err)
 	}

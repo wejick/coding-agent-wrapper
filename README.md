@@ -64,17 +64,17 @@ using the agent's own injection points.
 go build -o wr ./cmd/wr
 
 wr doctor                       # setup check: binaries found? pack state?
-wr --pack ./testdata/pack doctor        # ...and the computed launch, with reasons
-wr --pack ./testdata/pack claude        # run real Claude Code with the example pack
+wr --pack ./examples/pack doctor        # ...and the computed launch, with reasons
+wr --pack ./examples/pack claude        # run real Claude Code with the example pack
 ```
 
-`testdata/pack` is a complete example org pack. `doctor` never runs anything.
+`examples/pack` is a complete example org pack. `doctor` never runs anything.
 It prints the binary, the exact arguments, injected env vars and a decision
 trail.
 
 ### 2. Create your org pack
 
-Copy `testdata/pack` into a new repo and edit. Every file is optional and
+Copy `examples/pack` into a new repo and edit. Every file is optional and
 uses the format the agent natively understands:
 
 ```
@@ -136,3 +136,7 @@ pack URL and ref are baked in, so there is nothing for them to configure.
 Claude Code adapter is complete and tested against a real install.
 OpenCode and pi adapters are next; the `Adapter` interface is stable for
 them.
+
+## License
+
+[MIT](LICENSE)

@@ -44,7 +44,7 @@ Flags:
 Examples:
   WRAPPER_PACK_URL=github.com/acme/agent-defaults wr claude
   wr --pack github.com/acme/agent-defaults --ref v1.2.0 --enforce claude --model opus
-  wr --pack ./testdata/pack doctor
+  wr --pack ./examples/pack doctor
 `
 
 func main() {

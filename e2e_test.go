@@ -98,7 +98,7 @@ func controlledHome(t *testing.T, userSettings string) string {
 
 func packAbs(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs("testdata/pack")
+	abs, err := filepath.Abs("examples/pack")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,11 +374,11 @@ func TestE2ESyncFromLocalGitOrigin(t *testing.T) {
 		}
 	}
 	git("init", "--quiet")
-	if err := filepath.WalkDir("testdata/pack", func(path string, d os.DirEntry, err error) error {
+	if err := filepath.WalkDir("examples/pack", func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		rel, err := filepath.Rel("testdata/pack", path)
+		rel, err := filepath.Rel("examples/pack", path)
 		if err != nil {
 			return err
 		}
