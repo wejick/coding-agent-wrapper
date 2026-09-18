@@ -35,15 +35,15 @@ Flags:
   --pack URL|PATH    defaults pack: a git URL or a local directory
                      (env WRAPPER_PACK_URL)
   --ref REF          git branch, tag or commit to pin (env WRAPPER_PACK_REF)
-  --enforce          apply the pack's policy layer over user settings
-                     (env WRAPPER_ENFORCE=1)
+  --no-policy        skip the pack's policy layer and env forcing for
+                     this launch (env WRAPPER_NO_POLICY=1)
   --strict-mcp       replace the user's MCP servers instead of extending them
   --refresh          force a pack refresh before acting
   --json             with doctor: print the report as JSON
 
 Examples:
   WRAPPER_PACK_URL=github.com/acme/agent-defaults wr claude
-  wr --pack github.com/acme/agent-defaults --ref v1.2.0 --enforce claude --model opus
+  wr --pack github.com/acme/agent-defaults --ref v1.2.0 claude --model opus
   wr --pack ./examples/pack doctor
 `
 
@@ -58,7 +58,7 @@ func main() {
 type globals struct {
 	packRef   string
 	rev       string
-	enforce   bool
+	noPolicy  bool
 	strictMCP bool
 	refresh   bool
 	jsonOut   bool
@@ -110,7 +110,7 @@ func newFlagSet() *flag.FlagSet {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usageText) }
 	fs.StringVar(&globalsRef().packRef, "pack", os.Getenv("WRAPPER_PACK_URL"), "")
 	fs.StringVar(&globalsRef().rev, "ref", os.Getenv("WRAPPER_PACK_REF"), "")
-	fs.BoolVar(&globalsRef().enforce, "enforce", envBool("WRAPPER_ENFORCE"), "")
+	fs.BoolVar(&globalsRef().noPolicy, "no-policy", envBool("WRAPPER_NO_POLICY"), "")
 	fs.BoolVar(&globalsRef().strictMCP, "strict-mcp", false, "")
 	fs.BoolVar(&globalsRef().refresh, "refresh", false, "")
 	fs.BoolVar(&globalsRef().jsonOut, "json", false, "")
@@ -138,12 +138,12 @@ func source() (pack.Source, error) {
 
 func options(agent string, args []string, src pack.Source) wrapper.Options {
 	return wrapper.Options{
-		Agent:     agent,
-		Args:      args,
-		Pack:      src,
-		Refresh:   g.refresh,
-		Enforce:   g.enforce,
-		StrictMCP: g.strictMCP,
+		Agent:      agent,
+		Args:       args,
+		Pack:       src,
+		Refresh:    g.refresh,
+		SkipPolicy: g.noPolicy,
+		StrictMCP:  g.strictMCP,
 	}
 }
 

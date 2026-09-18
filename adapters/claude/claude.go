@@ -11,11 +11,12 @@
 //	                   and passed via --settings <merged file>; user and
 //	                   project values win per key, permission lists union
 //	policy.json        same merge but as the TOP layer, above user and
-//	                   project settings; wins per key (--enforce)
+//	                   project settings; wins per key (on by default,
+//	                   --no-policy skips it)
 //	mcp.json           --mcp-config <file>, added to the user's servers
 //	                   (or replacing them with --strict-mcp-config)
 //	env.json           environment variables; existing environment wins
-//	                   unless --enforce
+//	                   unless policy mode is on (the default)
 //	plugin/            --plugin-dir <dir>: org skills, agents, commands
 //	                   and hooks as a Claude Code plugin
 //	system-prompt.md   --append-system-prompt-file <file>
@@ -91,7 +92,7 @@ func (a *Adapter) binaryName() string {
 
 // Build implements Adapter. It computes the full launch for Claude
 // Code from the pack, layering org defaults under user settings (and policy
-// above them when o.Enforce).
+// above them unless o.SkipPolicy).
 func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOptions) (*wrapper.Launch, error) {
 	launch := &wrapper.Launch{Notes: []string{}, Files: []string{}}
 	binary, err := a.Locate()
@@ -124,7 +125,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	policyPresent := false
 	if _, ok := p.File(DirName, FilePolicy); ok {
 		policyPresent = true
-		if o.Enforce {
+		if !o.SkipPolicy {
 			if hasPolicy, err = p.JSONFile(DirName, FilePolicy, &policy); err != nil {
 				return nil, err
 			}
@@ -149,8 +150,8 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		merged = pack.MergeJSON(merged, sf.value, rules)
 		labels = append(labels, sf.label+" "+sf.path)
 	}
-	if policyPresent && !o.Enforce {
-		launch.Notes = append(launch.Notes, "policy.json present but --enforce not set; policy layer skipped")
+	if policyPresent && o.SkipPolicy {
+		launch.Notes = append(launch.Notes, "policy.json present but skipped (--no-policy); soft defaults only")
 	}
 	if hasPolicy {
 		merged = pack.MergeJSON(merged, policy, rules)
@@ -207,7 +208,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	}
 	if hasEnv {
 		org = true
-		merged, notes := pack.MergeEnv(base, envDefaults, o.Enforce)
+		merged, notes := pack.MergeEnv(base, envDefaults, !o.SkipPolicy)
 		launch.Notes = append(launch.Notes, notes...)
 		launch.Env = merged
 	} else {

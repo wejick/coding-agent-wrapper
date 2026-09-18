@@ -34,8 +34,9 @@ human-readable `Notes` trail. `Run` = `Prepare` + `Exec`; adapters only own
    config, merge the pack beneath it so the higher layer wins per key and
    additive lists union: if the pack sets `"includeCoAuthoredBy": false`
    and the user set it to `true`, `true` survives. The locked
-   `policy.json` layer is the only thing allowed on top, and only when
-   `o.Enforce` is set. See [config-layers.md](config-layers.md) for the
+   `policy.json` layer is the only thing allowed on top, and the adapter
+   applies it unless `o.SkipPolicy` is set. See
+   [config-layers.md](config-layers.md) for the
    model the Claude adapter implements.
 3. Put user args last. Append `o.Args` after injected flags so explicit
    user flags still apply.

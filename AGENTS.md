@@ -48,7 +48,7 @@ go vet ./...            # must pass
 ## Design principles
 
 - The library is the product and the CLIs are its consumers. Anything
-  org-specific (names, pack URLs, enforcement defaults) belongs in the
+  org-specific (names, pack URLs, policy opt-outs) belongs in the
   embedding binary, not in `wrapper` or `pack`.
 - Everything is applied at launch time and nothing is mutated. Pack files
   become flags, env vars and generated files the agent natively accepts.
@@ -57,7 +57,8 @@ go vet ./...            # must pass
   atomically on each launch.
 - The layer order is fixed. The pack's `claude/settings.json` is the
   lowest layer, followed by user, project and local-project settings,
-  with `policy.json` on top when `Enforce` is set: if the pack ships
+  with `policy.json` on top unless the launch skips it (`SkipPolicy` /
+  `--no-policy`): if the pack ships
   `"model": "sonnet"` and the user set `"model": "opus"`, the merged
   settings contain `opus`. Higher layers win per key, and permission
   lists union. `docs/config-layers.md` is the canonical description.

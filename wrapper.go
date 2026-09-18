@@ -58,8 +58,10 @@ type Options struct {
 	// Refresh forces a pack round trip before launching instead of using
 	// the cached copy.
 	Refresh bool
-	// Enforce applies the pack's policy layer over user settings.
-	Enforce bool
+	// SkipPolicy skips the pack's policy layer and stops forcing pack env
+	// defaults, so the launch runs with soft defaults only. The zero
+	// value enforces org policy.
+	SkipPolicy bool
 	// StrictMCP replaces the user's MCP configuration instead of extending
 	// it (where the agent supports it).
 	StrictMCP bool
@@ -110,10 +112,10 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	}
 	p.Notes = append(p.Notes, res.Notes...)
 	launch, err := a.Build(ctx, p, BuildOptions{
-		Args:      opts.Args,
-		Env:       opts.Env,
-		Enforce:   opts.Enforce,
-		StrictMCP: opts.StrictMCP,
+		Args:       opts.Args,
+		Env:        opts.Env,
+		SkipPolicy: opts.SkipPolicy,
+		StrictMCP:  opts.StrictMCP,
 	})
 	if err != nil {
 		return nil, err

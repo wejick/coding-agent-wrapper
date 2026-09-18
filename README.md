@@ -43,8 +43,8 @@ using the agent's own injection points.
   next launch; there is no rollout step and no machine drift.
 - Org defaults merge under the developer's own settings, so personal and
   project choices win. Org requirements that must not be overridden go in
-  a separate policy layer that only applies with `--enforce`
-  ([docs/config-layers.md](docs/config-layers.md)).
+  a separate policy layer that applies by default; `--no-policy` skips it
+  for a launch ([docs/config-layers.md](docs/config-layers.md)).
 - Nothing is written to `~/.claude` or to any project. Stop using the
   wrapper and the setup is stock again.
 - The pack can be pinned to a branch, tag or commit, so every machine and
@@ -81,7 +81,8 @@ uses the format the agent natively understands:
 version.json              metadata: {"name": "...", "version": "..."}
 claude/
   settings.json           org defaults (users and projects always win)
-  policy.json             locked layer, applied only with --enforce
+  policy.json             locked layer, applied by default (--no-policy
+                          skips it for a launch)
   mcp.json                MCP servers added to the user's own
   env.json                environment variable defaults
   plugin/                 org skills, agents, commands, hooks
@@ -107,10 +108,11 @@ import (
 func main() {
 	wrapper.Register(claude.New())
 	err := wrapper.Run(context.Background(), wrapper.Options{
-		Agent:   "claude",
-		Args:    os.Args[1:],
-		Pack:    pack.Git("github.com/acme/agent-defaults#pack", "v1"),
-		Enforce: os.Getenv("ACME_ENFORCE") == "1",
+		Agent: "claude",
+		Args:  os.Args[1:],
+		Pack:  pack.Git("github.com/acme/agent-defaults#pack", "v1"),
+		// Policy applies by default. Wire a --no-policy flag (SkipPolicy)
+		// only if you want to offer developers an escape hatch.
 	})
 	if err != nil {
 		os.Exit(1)

@@ -271,15 +271,14 @@ func TestBuildPrunesOldMergedSettings(t *testing.T) {
 	}
 }
 
-func TestBuildEnforceAppliesPolicy(t *testing.T) {
+func TestBuildAppliesPolicyByDefault(t *testing.T) {
 	fakeBinary(t)
 	homeWithUserSettings(t, `{}`)
 	a := claude.New()
 	a.CacheDir = t.TempDir()
 
 	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
-		Enforce: true,
-		Env:     []string{"DISABLE_TELEMETRY=custom", "PATH=/usr/bin"},
+		Env: []string{"DISABLE_TELEMETRY=custom", "PATH=/usr/bin"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +287,7 @@ func TestBuildEnforceAppliesPolicy(t *testing.T) {
 	perms := merged["permissions"].(map[string]any)
 	deny := perms["deny"].([]any)
 	if len(deny) != 3 {
-		t.Fatalf("policy deny entries should apply when enforcing, got %v", deny)
+		t.Fatalf("policy deny entries should apply by default, got %v", deny)
 	}
 
 	var envValue string
@@ -298,18 +297,19 @@ func TestBuildEnforceAppliesPolicy(t *testing.T) {
 		}
 	}
 	if envValue != "1" {
-		t.Fatalf("enforce must force env defaults, got DISABLE_TELEMETRY=%s", envValue)
+		t.Fatalf("policy mode must force env defaults, got DISABLE_TELEMETRY=%s", envValue)
 	}
 }
 
-func TestBuildWithoutEnforceSkipsPolicy(t *testing.T) {
+func TestBuildSkipPolicySkipsPolicy(t *testing.T) {
 	fakeBinary(t)
 	homeWithUserSettings(t, `{"model":"opus"}`)
 	a := claude.New()
 	a.CacheDir = t.TempDir()
 
 	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
-		Env: []string{"DISABLE_TELEMETRY=custom"},
+		SkipPolicy: true,
+		Env:        []string{"DISABLE_TELEMETRY=custom"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestBuildWithoutEnforceSkipsPolicy(t *testing.T) {
 	perms, ok := merged["permissions"].(map[string]any)
 	if ok {
 		if _, has := perms["deny"]; has {
-			t.Fatal("policy must not apply without --enforce")
+			t.Fatal("policy must not apply with SkipPolicy")
 		}
 	}
 	sawPolicyNote := false
@@ -337,7 +337,7 @@ func TestBuildWithoutEnforceSkipsPolicy(t *testing.T) {
 		}
 	}
 	if envValue != "custom" {
-		t.Fatalf("without enforce the environment wins, got DISABLE_TELEMETRY=%s", envValue)
+		t.Fatalf("with policy skipped the environment wins, got DISABLE_TELEMETRY=%s", envValue)
 	}
 }
 
@@ -403,7 +403,7 @@ func TestBuildPolicyOnlyPack(t *testing.T) {
 	a := claude.New()
 	a.CacheDir = t.TempDir()
 
-	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{Enforce: true})
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

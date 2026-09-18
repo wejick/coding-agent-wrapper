@@ -19,9 +19,10 @@ type BuildOptions struct {
 	// Env is the base environment for the child process; nil means
 	// os.Environ.
 	Env []string
-	// Enforce applies the pack's policy layer (locked settings) on top of
-	// user settings, and forces pack env vars over inherited ones.
-	Enforce bool
+	// SkipPolicy skips the pack's policy layer (locked settings) and
+	// stops forcing pack env defaults. The zero value enforces org
+	// policy.
+	SkipPolicy bool
 	// StrictMCP asks the agent to replace the user's MCP configuration
 	// instead of extending it, where the agent supports it.
 	StrictMCP bool

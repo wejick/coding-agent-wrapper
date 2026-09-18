@@ -10,10 +10,12 @@ organization's defaults pack.
 - `claude/settings.json`: org defaults. Merged under the developer's user
   and project settings, so their choices win per key.
 - `claude/policy.json`: locked layer, applied over everything the wrapper
-  controls when the wrapper runs with `--enforce`.
+  controls by default; `--no-policy` skips it for a launch.
 - `claude/mcp.json`: MCP servers added to the developer's own.
-- `claude/env.json`: environment variable defaults; the developer's
-  existing environment wins unless `--enforce`.
+- `claude/env.json`: environment variable defaults; in policy mode (the
+  default) org values force-replace existing ones. This is also where the
+  org's model gateway goes, for example `ANTHROPIC_BASE_URL` pointing at
+  your LLM proxy (see `docs/config-layers.md`).
 - `claude/plugin/`: an org plugin (skills, commands, hooks) loaded with
   `--plugin-dir`.
 - `claude/system-prompt.md`: appended to the agent's system prompt.

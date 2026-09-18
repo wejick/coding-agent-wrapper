@@ -21,7 +21,8 @@ Highest wins per key:
 │ Your own CLI flags (--model opus, --strict-mcp, ...) │  explicit intent,
 │                                                      │  passes through
 ├──────────────────────────────────────────────────────┤
-│ pack: claude/policy.json                (--enforce)  │  ORG LOCKED LAYER
+│ pack: claude/policy.json        (default on)  │  ORG LOCKED LAYER
+│                                                      │  --no-policy skips
 │                                                      │  user cannot override
 ├──────────────────────────────────────────────────────┤
 │ <project>/.claude/settings.local.json                │  native layers,
@@ -50,8 +51,9 @@ At launch, the wrapper reads and applies files in this order:
 3. It merges in `<project>/.claude/settings.json`, then
    `<project>/.claude/settings.local.json`. These sit above the user's
    settings, matching Claude Code's native precedence.
-4. With `--enforce`, it applies `policy.json` into the file last, so
-   neither the user nor a project can override those values.
+4. It applies `policy.json` into the file last, so neither the user nor a
+   project can override those values. Launching with `--no-policy` skips
+   this step.
 5. It writes the result to a cache file and starts `claude` with
    `--settings <that file>`. Claude Code applies that file at the
    command-line tier, above everything except IT-managed settings and the
@@ -119,14 +121,14 @@ Applied at every layer boundary, by the wrapper (not by the agent):
 | --------------------- | ---------------------------- | ------------------------------ |
 | Position in the stack | bottom                       | top                            |
 | User can override?    | yes, per key                 | **no**                         |
-| Applied               | always                       | only with `--enforce`          |
+| Applied               | always                       | by default                     |
 | Intended contents     | conveniences, allowlists, model defaults | guardrails: deny rules on secrets, audit settings, required endpoints |
-| Without `--enforce`   | applied                      | ignored (doctor notes it)      |
+| With `--no-policy`    | applied                      | skipped for that launch (doctor notes it) |
 
 Guideline: if a user would reasonably want to change it, it belongs in
-`settings.json`. If the org requires it, it belongs in `policy.json`, and
-people run with `--enforce` (typically baked into the org's wrapper binary
-or `WRAPPER_ENFORCE=1`).
+`settings.json`. If the org requires it, it belongs in `policy.json`.
+Policy applies by default; orgs that want an escape hatch wire a
+`--no-policy` flag (env `WRAPPER_NO_POLICY=1`) into their wrapper binary.
 
 ## Environment variables
 
@@ -137,10 +139,11 @@ Two distinct mechanisms, different rules:
 | `settings.json`/`policy.json` → `env` key | merged like any other settings key (higher layer wins per variable); Claude Code applies it to its own tools |
 | pack `claude/env.json`          | injected into the process environment at launch   |
 
-For `env.json`: **your existing environment wins**. Org values are
-defaults, so `DISABLE_TELEMETRY=custom` already set in your shell stays.
-With `--enforce`, org values **force-replace** existing ones. Every
-decision is recorded in the launch notes (`wr doctor`).
+For `env.json` in policy mode (the default): org values **force-replace**
+existing ones, so `DISABLE_TELEMETRY=custom` already set in your shell is
+replaced by the org value. With `--no-policy`, your existing environment
+wins and org values only fill gaps. Every decision is recorded in the
+launch notes (`wr doctor`).
 
 ## MCP servers
 
@@ -150,6 +153,42 @@ decision is recorded in the launch notes (`wr doctor`).
   entirely (kiosk/CI scenarios).
 - Name collisions between org and user servers are resolved by the agent;
   orgs should namespace their server names (`acme-handbook`, not `fetch`).
+
+## Routing model traffic through the org gateway
+
+Claude Code reaches the model API through environment variables, and the
+wrapper injects environment variables at launch. Together that is all an
+organization needs to route sessions through an LLM gateway (LiteLLM,
+Helicone, Cloudflare AI Gateway, an internal proxy) for caching, logging,
+budgets or audit.
+
+`claude/env.json` in the pack:
+
+```json
+{
+  "ANTHROPIC_BASE_URL": "https://llm-gateway.acme.com",
+  "ANTHROPIC_AUTH_TOKEN": "<gateway token>",
+  "ANTHROPIC_MODEL": "claude-sonnet-4-5"
+}
+```
+
+The layering rules apply unchanged:
+
+- Without skipping policy (the default), a developer who already exports
+  `ANTHROPIC_BASE_URL` is routed to the gateway anyway: org values
+  replace inherited ones.
+- With `--no-policy`, the developer's own environment wins and the org
+  gateway URL only applies when they have none.
+- Model selection works the same way: `ANTHROPIC_MODEL` as a default, or
+  the `model` key in `settings.json`, still overridable per key by the
+  developer and the project.
+
+Keep real tokens out of the pack repo: an org-wide token comes from your
+installer, and per-user tokens fit the `apiKeyHelper` settings key, which
+shells out to your secret tool. For a hard guarantee that traffic only
+reaches the gateway, pair the wrapper with a network policy that allows
+gateway egress only; the wrapper cannot stop a developer who runs
+`claude` directly.
 
 ## Plugins, skills, commands
 
