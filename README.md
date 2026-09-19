@@ -51,7 +51,7 @@ using the agent's own injection points.
   CI job sees the same configuration. Cached packs keep launches working
   offline.
 - Each agent has an adapter that translates the pack into its native
-  injection points. Claude Code ships here; OpenCode and pi use the same
+  injection points. Claude Code and OpenCode ship here; pi uses the same
   interface.
 - You compile your own binary with your CLI name and pack URL baked in.
   Developers install one internal tool and run `acme claude`.
@@ -66,6 +66,7 @@ go build -o wr ./cmd/wr
 wr doctor                       # setup check: binaries found? pack state?
 wr --pack ./examples/pack doctor        # ...and the computed launch, with reasons
 wr --pack ./examples/pack claude        # run real Claude Code with the example pack
+wr --pack ./examples/pack opencode      # run real OpenCode with the example pack
 ```
 
 `examples/pack` is a complete example org pack. `doctor` never runs anything.
@@ -130,14 +131,14 @@ pack URL and ref are baked in, so there is nothing for them to configure.
 | Doc | Contents |
 | --- | --- |
 | [docs/config-layers.md](docs/config-layers.md) | The layering model: how org defaults, policy, user settings, project settings and CLI flags combine; `settings.json` vs `policy.json`; env, MCP and plugin interaction |
-| [docs/adapters.md](docs/adapters.md) | Supporting a new agent (OpenCode, pi, ...) behind the `Adapter` interface |
+| [docs/adapters.md](docs/adapters.md) | Supporting a new agent (pi, ...) behind the `Adapter` interface |
 | [AGENTS.md](AGENTS.md) | Repository layout, design principles, build and test conventions |
 
 ## Status
 
-Claude Code adapter is complete and tested against a real install.
-OpenCode and pi adapters are next; the `Adapter` interface is stable for
-them.
+The Claude Code and OpenCode adapters are complete and tested against
+real installs. A pi adapter is next; the `Adapter` interface is stable
+for it.
 
 ## License
 

@@ -200,6 +200,54 @@ func TestE2ELaunchAppliesDefaultsAndPassesThrough(t *testing.T) {
 	}
 }
 
+func TestE2ELaunchOpenCodeInjectsEnvironment(t *testing.T) {
+	home := controlledHome(t, "")
+	binDir := t.TempDir()
+	fakeAgent(t, binDir, "opencode")
+	record := filepath.Join(t.TempDir(), "record")
+
+	env := upsertEnv(os.Environ(),
+		"HOME="+home,
+		"PATH="+binDir+string(filepath.ListSeparator)+os.Getenv("PATH"),
+		"RECORD="+record,
+	)
+	stdout, code := runWr(t, env, "--pack", packAbs(t), "opencode", "run", "hello")
+	if code != 0 {
+		t.Fatalf("agent exit code should pass through, got %d\n%s", code, stdout)
+	}
+	rec := readRecord(t, record)
+
+	// Nothing is injected into argv; user args pass through untouched.
+	if strings.Join(rec.Args, " ") != "run hello" {
+		t.Fatalf("agent args = %v, want the user's args only", rec.Args)
+	}
+	// The generated config file exists and layers org defaults.
+	configPath := rec.Env["OPENCODE_CONFIG"]
+	if configPath == "" {
+		t.Fatalf("OPENCODE_CONFIG must point at the generated file, env: %v", rec.Env)
+	}
+	merged, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("generated config: %v", err)
+	}
+	for _, want := range []string{`"share": "disabled"`, `"org-handbook"`} {
+		if !strings.Contains(string(merged), want) {
+			t.Fatalf("generated config missing %s:\n%s", want, merged)
+		}
+	}
+	// The policy travels through OPENCODE_CONFIG_CONTENT above project
+	// config, and org env defaults are injected.
+	if !strings.Contains(rec.Env["OPENCODE_CONFIG_CONTENT"], "deny") {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT should carry the policy, got %q", rec.Env["OPENCODE_CONFIG_CONTENT"])
+	}
+	if rec.Env["DISABLE_TELEMETRY"] != "1" {
+		t.Fatalf("DISABLE_TELEMETRY = %q, want 1", rec.Env["DISABLE_TELEMETRY"])
+	}
+	if rec.Env["HOME"] != home {
+		t.Fatalf("HOME = %q, want the controlled %q", rec.Env["HOME"], home)
+	}
+}
+
 func TestE2ESignalReachesAgentDirectly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("UNIX signal semantics")
@@ -308,6 +356,7 @@ func TestE2EDoctorJSON(t *testing.T) {
 	home := controlledHome(t, "")
 	binDir := t.TempDir()
 	fakeAgent(t, binDir, "claude")
+	fakeAgent(t, binDir, "opencode")
 
 	env := upsertEnv(os.Environ(),
 		"HOME="+home,
@@ -324,17 +373,35 @@ func TestE2EDoctorJSON(t *testing.T) {
 		} `json:"agents"`
 		Launch map[string]struct {
 			Args []string `json:"args"`
+			Env  []string `json:"env_injected"`
 		} `json:"launch"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
 		t.Fatalf("doctor --json: %v\n%s", err, stdout)
 	}
-	if len(report.Agents) != 1 || report.Agents[0].Name != "claude" {
+	names := map[string]bool{}
+	for _, a := range report.Agents {
+		names[a.Name] = true
+	}
+	if !names["claude"] || !names["opencode"] || len(report.Agents) != 2 {
 		t.Fatalf("agents = %+v", report.Agents)
 	}
 	launch, ok := report.Launch["claude"]
 	if !ok || len(launch.Args) == 0 || launch.Args[0] != "--settings" {
 		t.Fatalf("launch.claude = %+v", launch)
+	}
+	oconfig, ok := report.Launch["opencode"]
+	if !ok {
+		t.Fatalf("launch.opencode missing")
+	}
+	hasConfig := false
+	for _, kv := range oconfig.Env {
+		if strings.HasPrefix(kv, "OPENCODE_CONFIG=") {
+			hasConfig = true
+		}
+	}
+	if !hasConfig {
+		t.Fatalf("launch.opencode should inject OPENCODE_CONFIG, got %+v", oconfig)
 	}
 }
 

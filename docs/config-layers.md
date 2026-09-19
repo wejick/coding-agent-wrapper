@@ -3,10 +3,10 @@
 How the wrapper combines an organization's defaults with everything a user
 and their projects already have. The short version:
 
-> **The wrapper inserts two layers into Claude Code's existing stack (org
-> defaults at the very bottom, opt-in org policy at the very top) and
-> rebuilds the merge itself, so the result is deterministic and inspectable.
-> Nothing on disk is modified.**
+> **The wrapper inserts two layers into the agent's existing stack (org
+> defaults at the very bottom, org policy at the very top, `--no-policy`
+> to skip policy for a launch) and rebuilds the merge itself, so the result
+> is deterministic and inspectable. Nothing on disk is modified.**
 
 ## The full stack
 
@@ -196,6 +196,54 @@ gateway egress only; the wrapper cannot stop a developer who runs
 plugin. The user's own installed plugins, skills and commands are untouched
 and keep working. Name your plugin after the org (`acme-defaults`) so both
 can coexist.
+
+## OpenCode
+
+OpenCode merges named config sources, later sources win per key: remote
+(`.well-known/opencode`) < global (`~/.config/opencode/opencode.json`)
+< `OPENCODE_CONFIG` < project `opencode.json` < config directories
+(`.opencode/`, `OPENCODE_CONFIG_DIR`) < `OPENCODE_CONFIG_CONTENT` <
+admin-managed files < macOS managed preferences. The adapter maps the org
+layers onto those native sources:
+
+| Pack file | Injection point |
+| --- | --- |
+| `opencode/settings.json` | generated file via `OPENCODE_CONFIG` |
+| `opencode/policy.json` | `OPENCODE_CONFIG_CONTENT` |
+| `opencode/env.json` | process environment, same rules as `claude/env.json` |
+| `opencode/config/` | `OPENCODE_CONFIG_DIR`, loaded like a `.opencode` directory: agents, commands, plugins, skills, tools, themes |
+
+`OPENCODE_CONFIG` sits above the user's global config, so passing org
+defaults alone would let them shadow personal choices per key. The adapter
+therefore reads the user's global config (`config.json`, `opencode.json`,
+`opencode.jsonc`; comments and trailing commas tolerated) plus the user's
+own `OPENCODE_CONFIG` file when one is set, merges the org defaults
+underneath, and points `OPENCODE_CONFIG` at the generated file. The
+effective order for a wrapped launch:
+
+```
+org defaults < user global < user's own OPENCODE_CONFIG
+  < project opencode.json < org policy < admin-managed
+```
+
+Nothing is injected into argv: every injection point is an environment
+variable, so the user's arguments reach `opencode` untouched. Generated
+files live under `~/Library/Caches/coding-agent-wrapper/merge/opencode/`
+(macOS; `~/.cache/coding-agent-wrapper/...` on Linux), named by content
+hash and pruned after a month, same as the Claude adapter.
+
+Caveats:
+
+- Sessions may be served by a background `opencode` service. The wrapper
+  configures the processes it starts; a service started outside the
+  wrapper keeps its own environment. The `opencode debug` subcommands talk
+  to the running service, so their output reflects the service's
+  environment, not the wrapped launch: verify by restarting `opencode`
+  from a wrapped shell. For hard guarantees, pair the wrapper with
+  admin-managed settings or MDM profiles, which sit above everything the
+  wrapper controls.
+- Org `permission` and `mcp` rules in `policy.json` win per key over user
+  and project config.
 
 ## How this interacts with running vanilla `claude`
 

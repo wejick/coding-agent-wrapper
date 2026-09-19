@@ -1,8 +1,8 @@
 # Example defaults pack
 
-A complete, working defaults pack for the Claude Code adapter. Copy this
-directory into a new git repo and edit the files; that repo becomes your
-organization's defaults pack.
+A complete, working defaults pack for the Claude Code and OpenCode
+adapters. Copy this directory into a new git repo and edit the files; that
+repo becomes your organization's defaults pack.
 
 ## What each file does
 
@@ -19,9 +19,20 @@ organization's defaults pack.
 - `claude/plugin/`: an org plugin (skills, commands, hooks) loaded with
   `--plugin-dir`.
 - `claude/system-prompt.md`: appended to the agent's system prompt.
+- `opencode/settings.json`: org defaults in OpenCode config shape
+  (permissions, MCP servers, runtime options). Merged under the
+  developer's global config and their project `opencode.json`, so their
+  choices win per key.
+- `opencode/policy.json`: locked layer, passed to OpenCode above project
+  config via `OPENCODE_CONFIG_CONTENT`; `--no-policy` skips it for a
+  launch.
+- `opencode/env.json`: environment variable defaults, same rules as the
+  Claude adapter.
+- `opencode/config/`: org agents, commands, plugins and skills, loaded
+  via `OPENCODE_CONFIG_DIR` like a project `.opencode` directory.
 
-Every file is optional. A `claude/` directory with no files launches the
-agent unchanged.
+Every file is optional. A `claude/` or `opencode/` directory with no files
+launches that agent unchanged.
 
 ## Try it from this repository
 
@@ -29,6 +40,7 @@ agent unchanged.
 go build -o wr ./cmd/wr
 ./wr --pack ./examples/pack doctor
 ./wr --pack ./examples/pack claude
+./wr --pack ./examples/pack opencode
 ```
 
 ## Use it as your organization's pack

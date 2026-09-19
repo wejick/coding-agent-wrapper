@@ -20,6 +20,7 @@ import (
 
 	wrapper "github.com/wejick/coding-agent-wrapper"
 	"github.com/wejick/coding-agent-wrapper/adapters/claude"
+	"github.com/wejick/coding-agent-wrapper/adapters/opencode"
 	"github.com/wejick/coding-agent-wrapper/pack"
 )
 
@@ -49,6 +50,7 @@ Examples:
 
 func main() {
 	wrapper.Register(claude.New())
+	wrapper.Register(opencode.New())
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "wr:", err)
 		os.Exit(1)

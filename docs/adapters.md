@@ -53,21 +53,27 @@ human-readable `Notes` trail. `Run` = `Prepare` + `Exec`; adapters only own
 
 ## Mapping agents to injection points
 
-| Concern | Claude Code (shipped) | OpenCode (planned) | pi (planned) |
+| Concern | Claude Code (shipped) | OpenCode (shipped) | pi (planned) |
 | --- | --- | --- | --- |
-| Settings/config | `--settings <merged file>` | `OPENCODE_CONFIG` env → generated config | config paths |
-| MCP servers | `--mcp-config` (+ `--strict-mcp-config`) | `mcp` key in config | extensions/config |
-| Env vars | process env (+ `env` settings key) | process env / provider config | process env |
-| Skills, agents, commands | `--plugin-dir <dir>` (session-scoped plugin) | `.opencode/` dirs on disk | extensions |
-| System prompt | `--append-system-prompt-file` | rules/instructions config | system prompt config |
-| Policy layer | merged on top, passed via `--settings` | merged into generated config | merged into generated config |
+| Settings/config | `--settings <merged file>` | `OPENCODE_CONFIG` env → generated config, user global folded in | config paths |
+| MCP servers | `--mcp-config` (+ `--strict-mcp-config`) | `mcp` key in the generated config | extensions/config |
+| Env vars | process env (+ `env` settings key) | process env (`env.json`) | process env |
+| Skills, agents, commands | `--plugin-dir <dir>` (session-scoped plugin) | `OPENCODE_CONFIG_DIR` → pack `opencode/config/` | extensions |
+| System prompt | `--append-system-prompt-file` | `instructions` config key (unions across layers) | system prompt config |
+| Policy layer | merged on top, passed via `--settings` | `OPENCODE_CONFIG_CONTENT` env, above project config | merged into generated config |
 
 Agents without a native "extra config layer" mechanism (like Claude's
 `--settings`) need the generated-file approach: read the user's config,
 merge the pack under it, write to a cache path, and point the agent at it
-via its config-path env var or flag. The Claude adapter's
-`writeMergedSettings` (atomic write, cache dir, deterministic path) is the
-reference pattern.
+via its config-path env var or flag. Mind where the agent places that
+path in its own precedence: OpenCode's `OPENCODE_CONFIG` sits above the
+user's global config, so the OpenCode adapter folds the user's global
+config (and their own `OPENCODE_CONFIG` file) into the generated file
+under the org defaults instead of passing org defaults alone. Both
+adapters share the content-addressed write and tolerant config reads in
+`adapters/internal/mergedfile`; the Claude adapter's `writeMergedSettings`
+behavior (atomic write, cache dir, deterministic path) is the reference
+pattern.
 
 ## Testing recipe
 
@@ -76,8 +82,9 @@ Adapters are tested without any agent installed:
 - Put a fake executable named after the agent in a temp dir and `t.Setenv("PATH", dir)`, and `Locate` resolves it.
 - Set `t.Setenv("HOME", tmp)` and `a.ProjectDir = tmp2` to control every settings layer.
 - Assert on the computed `Launch`: args order, merged-file contents, env diff, notes.
-- See `adapters/claude/claude_test.go` for the full pattern, including the
-  project-layering and policy tests.
+- See `adapters/claude/claude_test.go` and
+  `adapters/opencode/opencode_test.go` for the full pattern, including
+  the project-layering, policy and corrupt-config tests.
 
 Register the adapter from the *consumer's* binary
 (`wrapper.Register(opencode.New())`), keeping `wrapper` itself free of

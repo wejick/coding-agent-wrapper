@@ -26,16 +26,14 @@ package claude
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	wrapper "github.com/wejick/coding-agent-wrapper"
+	"github.com/wejick/coding-agent-wrapper/adapters/internal/mergedfile"
 	"github.com/wejick/coding-agent-wrapper/pack"
 )
 
@@ -139,11 +137,17 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		merged = pack.MergeJSON(merged, defaults, rules)
 		labels = append(labels, "org defaults")
 	}
-	if user := a.userSettings(); user.ok {
+	if user := a.userSettings(); user.corrupt != "" {
+		launch.Notes = append(launch.Notes, fmt.Sprintf("user settings %s could not be parsed (%s); org defaults may override it", user.path, user.corrupt))
+	} else if user.ok {
 		merged = pack.MergeJSON(merged, user.value, rules)
 		labels = append(labels, "user "+user.path)
 	}
 	for _, sf := range a.projectSettings() {
+		if sf.corrupt != "" {
+			launch.Notes = append(launch.Notes, fmt.Sprintf("%s settings %s could not be parsed (%s); org defaults may override it", sf.label, sf.path, sf.corrupt))
+			continue
+		}
 		if !sf.ok {
 			continue
 		}
@@ -226,16 +230,20 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 
 // settingsFile is one settings layer on disk.
 type settingsFile struct {
-	label string
-	path  string
-	value map[string]any
-	ok    bool
+	label   string
+	path    string
+	value   map[string]any
+	ok      bool
+	corrupt string
 }
 
 func (a *Adapter) readSettings(label, path string) settingsFile {
 	var v map[string]any
-	ok, err := readJSON(path, &v)
-	if err != nil || !ok {
+	state, err := mergedfile.ReadJSON(path, &v)
+	if state == mergedfile.Corrupt {
+		return settingsFile{label: label, path: path, corrupt: err.Error()}
+	}
+	if state != mergedfile.Loaded {
 		return settingsFile{label: label, path: path}
 	}
 	return settingsFile{label: label, path: path, value: v, ok: true}
@@ -272,74 +280,20 @@ func (a *Adapter) projectSettings() []settingsFile {
 }
 
 func (a *Adapter) writeMergedSettings(merged any) (string, error) {
-	dir := a.CacheDir
-	if dir == "" {
-		base, err := os.UserCacheDir()
-		if err != nil {
-			base = os.TempDir()
-		}
-		dir = filepath.Join(base, "coding-agent-wrapper", "merge", DirName)
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
 	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
 		return "", err
 	}
 	data = append(data, '\n')
-	// Name the file after its content. Two launches that would produce
-	// identical settings share one path safely, and launches with different
-	// settings can never overwrite each other's file between write and
-	// exec. The path stays deterministic, so nothing needs cleaning up
-	// after syscall.Exec.
-	sum := sha256.Sum256(data)
-	name := "settings-" + hex.EncodeToString(sum[:6]) + ".json"
-	final := filepath.Join(dir, name)
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp, final); err != nil {
-		return "", err
-	}
-	a.pruneMerged(dir, name)
-	return final, nil
+	// The file name comes from its content, so concurrent launches with
+	// identical settings share one path and different settings never
+	// overwrite each other between write and exec.
+	return mergedfile.Write(a.cacheDir(), "settings", data)
 }
 
-// pruneMerged deletes generated settings files that no launch has
-// referenced for a month. Best effort: cleanup must never fail a launch.
-func (a *Adapter) pruneMerged(dir, keep string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
+func (a *Adapter) cacheDir() string {
+	if a.CacheDir != "" {
+		return a.CacheDir
 	}
-	cutoff := time.Now().Add(-30 * 24 * time.Hour)
-	for _, entry := range entries {
-		name := entry.Name()
-		isHashed := strings.HasPrefix(name, "settings-") && strings.HasSuffix(name, ".json")
-		isLegacy := name == FileSettings
-		if name == keep || (!isHashed && !isLegacy) {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil || info.ModTime().After(cutoff) {
-			continue
-		}
-		os.Remove(filepath.Join(dir, name))
-	}
-}
-
-func readJSON(path string, v any) (bool, error) {
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	if err := json.Unmarshal(data, v); err != nil {
-		return false, fmt.Errorf("%s: %w", path, err)
-	}
-	return true, nil
+	return mergedfile.CacheDir(DirName)
 }

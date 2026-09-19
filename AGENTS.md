@@ -26,6 +26,13 @@ pack/
 adapters/claude/
   claude.go             Claude Code adapter: builds the launch from the pack
   claude_test.go        asserts on computed launches and merged settings
+adapters/opencode/
+  opencode.go           OpenCode adapter: layers org defaults into
+                        OPENCODE_CONFIG / OPENCODE_CONFIG_CONTENT
+  opencode_test.go      asserts on computed launches and injected env
+adapters/internal/mergedfile/
+  mergedfile.go         shared plumbing: content-addressed generated
+                        config files, tolerant JSON/JSONC config reads
 e2e_test.go            black-box tests: build the wr binary, drive it with a
                        fake agent, pin the exec model and anti-recursion
 cmd/wr/main.go          reference CLI: run, doctor, sync, agents

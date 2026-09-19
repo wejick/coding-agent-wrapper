@@ -7,12 +7,20 @@
 //	version.json          optional: {"name": "...", "version": "..."}
 //	claude/               defaults for the Claude Code adapter
 //	  settings.json         soft defaults (user settings win per key)
-//	  policy.json           locked layer (applied on top when enforcing)
+//	  policy.json           locked layer (applied on top by default)
 //	  mcp.json              {"mcpServers": {...}} added to the user's
 //	  env.json              {"KEY": "VALUE"} injected environment
 //	  system-prompt.md      appended to the agent's system prompt
 //	  plugin/               org plugin dir (skills, agents, commands, hooks)
-//	opencode/             (future adapters follow the same pattern)
+//	opencode/             defaults for the OpenCode adapter
+//	  settings.json         soft defaults in OpenCode config shape (the
+//	                        user's global config wins per key)
+//	  policy.json           locked layer (applied above project config)
+//	  env.json              {"KEY": "VALUE"} injected environment
+//	  config/               org agents, commands, plugins and skills
+//
+// Later adapters follow the same pattern: one subdirectory per agent,
+// named after the agent, with per-agent file names inside.
 package pack
 
 import (

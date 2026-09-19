@@ -250,21 +250,12 @@ func TestBuildPrunesOldMergedSettings(t *testing.T) {
 	if err := os.WriteFile(recent, []byte("{}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	legacy := filepath.Join(a.CacheDir, "settings.json")
-	if err := os.WriteFile(legacy, []byte("{}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(legacy, past, past); err != nil {
-		t.Fatal(err)
-	}
 
 	if _, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, stale := range []string{old, legacy} {
-		if _, err := os.Stat(stale); !os.IsNotExist(err) {
-			t.Fatalf("stale merged file should be pruned, %s, err=%v", stale, err)
-		}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatalf("stale merged file should be pruned, %s, err=%v", old, err)
 	}
 	if _, err := os.Stat(recent); err != nil {
 		t.Fatalf("recent merged file should be kept: %v", err)
@@ -431,6 +422,36 @@ func TestBuildWithoutUserSettings(t *testing.T) {
 	if merged["includeCoAuthoredBy"] != false {
 		t.Fatalf("org settings should apply as-is, got %v", merged)
 	}
+}
+
+func TestBuildNotesCorruptUserSettings(t *testing.T) {
+	fakeBinary(t)
+	home := t.TempDir()
+	dir := filepath.Join(home, ".claude")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"model":`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+
+	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := readMerged(t, launch)
+	if merged["includeCoAuthoredBy"] != false {
+		t.Fatalf("org defaults should still apply, got %v", merged)
+	}
+	for _, note := range launch.Notes {
+		if strings.Contains(note, "could not be parsed") && strings.Contains(note, "settings.json") {
+			return
+		}
+	}
+	t.Fatalf("expected a note about the unreadable user settings, got %v", launch.Notes)
 }
 
 func TestLocateFailsWithoutBinary(t *testing.T) {

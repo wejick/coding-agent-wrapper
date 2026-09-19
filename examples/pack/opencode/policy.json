@@ -1,0 +1,9 @@
+{
+  "permission": {
+    "bash": {
+      "*": "allow",
+      "rm -rf *": "deny",
+      "git push --force*": "deny"
+    }
+  }
+}
