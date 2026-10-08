@@ -30,11 +30,22 @@ func Write(dir, prefix string, data []byte) (string, error) {
 	sum := sha256.Sum256(data)
 	name := prefix + "-" + hex.EncodeToString(sum[:6]) + ".json"
 	final := filepath.Join(dir, name)
-	tmp := final + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	// Each writer gets its own temp file. Concurrent launches with the same
+	// content each rename a complete file onto the same path, and the last
+	// rename wins with identical bytes.
+	f, err := os.CreateTemp(dir, "."+prefix+"-*.tmp")
+	if err != nil {
 		return "", err
 	}
-	if err := os.Rename(tmp, final); err != nil {
+	tmp := f.Name()
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, final)
+	}
+	if err != nil {
 		os.Remove(tmp)
 		return "", err
 	}

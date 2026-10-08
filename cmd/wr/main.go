@@ -39,7 +39,8 @@ Flags:
   --no-policy        skip the pack's policy layer and env forcing for
                      this launch (env WRAPPER_NO_POLICY=1)
   --strict-mcp       replace the user's MCP servers instead of extending them
-  --refresh          force a pack refresh before acting
+  --refresh          refresh the defaults pack before acting; fails if the
+                     remote cannot be reached
   --json             with doctor: print the report as JSON
 
 Examples:
@@ -138,21 +139,42 @@ func source() (pack.Source, error) {
 	return pack.Git(g.packRef, g.rev), nil
 }
 
+// options never asks the launch to refresh: a launch runs on the cached
+// pack, and --refresh is handled up front by refresh so that a failure
+// stops the command instead of becoming a note.
 func options(agent string, args []string, src pack.Source) wrapper.Options {
 	return wrapper.Options{
 		Agent:      agent,
 		Args:       args,
 		Pack:       src,
-		Refresh:    g.refresh,
 		SkipPolicy: g.noPolicy,
 		StrictMCP:  g.strictMCP,
 	}
+}
+
+// refresh fetches the latest pack. A launch would fall back to the cached
+// pack when the remote cannot be reached; here the user asked for the
+// latest pack, so that is an error.
+func refresh(ctx context.Context, src pack.Source) (*pack.FetchResult, error) {
+	res, err := src.Fetch(ctx, pack.FetchOptions{Refresh: true})
+	if err != nil {
+		return nil, err
+	}
+	if res.RefreshErr != nil {
+		return nil, fmt.Errorf("could not refresh the defaults pack %s: %w", src.Describe(), res.RefreshErr)
+	}
+	return res, nil
 }
 
 func cmdRun(ctx context.Context, agent string, args []string) error {
 	src, err := source()
 	if err != nil {
 		return err
+	}
+	if g.refresh {
+		if _, err := refresh(ctx, src); err != nil {
+			return err
+		}
 	}
 	return wrapper.Run(ctx, options(agent, args, src))
 }
@@ -252,7 +274,12 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 		return &packStatus{Source: g.packRef, Error: err.Error()}
 	}
 	ps := &packStatus{Source: src.Describe()}
-	res, err := src.Fetch(ctx, pack.FetchOptions{Refresh: g.refresh})
+	var res *pack.FetchResult
+	if g.refresh {
+		res, err = refresh(ctx, src)
+	} else {
+		res, err = src.Fetch(ctx, pack.FetchOptions{})
+	}
 	if err != nil {
 		ps.Error = err.Error()
 		return ps
@@ -348,7 +375,7 @@ func cmdSync(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	res, err := src.Fetch(ctx, pack.FetchOptions{Refresh: true})
+	res, err := refresh(ctx, src)
 	if err != nil {
 		return err
 	}
@@ -360,10 +387,6 @@ func cmdSync(ctx context.Context) error {
 		src.Describe(), res.From, res.Dir, pack.HeadInfo(ctx, res.Dir), p.ShortVersion())
 	for _, note := range append(res.Notes, p.Notes...) {
 		fmt.Println("note:   " + note)
-	}
-	// Launches tolerate a stale cached pack; an explicit sync must not.
-	if len(res.Notes) > 0 {
-		return errors.New("sync incomplete; see notes above")
 	}
 	return nil
 }
