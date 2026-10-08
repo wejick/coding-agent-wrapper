@@ -471,4 +471,37 @@ func TestE2ESyncFromLocalGitOrigin(t *testing.T) {
 	if !strings.Contains(stdout, "from:   git") || !strings.Contains(stdout, "head:") {
 		t.Fatalf("sync should report source and head:\n%s", stdout)
 	}
+
+	// With the remote gone, a manual refresh fails with the reason instead
+	// of quietly running on the cached pack.
+	if err := os.Rename(origin, origin+"-gone"); err != nil {
+		t.Fatal(err)
+	}
+	stdout, code = runWr(t, env, "--pack", "file://"+origin, "sync")
+	if code == 0 || !strings.Contains(stdout, "could not refresh the defaults pack") {
+		t.Fatalf("sync against a missing remote should fail clearly, exit = %d\n%s", code, stdout)
+	}
+
+	binDir := t.TempDir()
+	fakeAgent(t, binDir, "claude")
+	record := filepath.Join(t.TempDir(), "record")
+	runEnv := upsertEnv(env,
+		"PATH="+binDir+string(filepath.ListSeparator)+os.Getenv("PATH"),
+		"RECORD="+record,
+	)
+	stdout, code = runWr(t, runEnv, "--pack", "file://"+origin, "--refresh", "claude")
+	if code == 0 || !strings.Contains(stdout, "could not refresh the defaults pack") {
+		t.Fatalf("--refresh against a missing remote should fail clearly, exit = %d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatal("the agent must not start when the requested refresh failed")
+	}
+
+	// Without --refresh, the launch runs on the cached pack.
+	if _, code = runWr(t, runEnv, "--pack", "file://"+origin, "claude"); code != 0 {
+		t.Fatalf("a launch without --refresh should use the cached pack, exit = %d", code)
+	}
+	if _, err := os.Stat(record); err != nil {
+		t.Fatal("the agent should have started from the cached pack")
+	}
 }

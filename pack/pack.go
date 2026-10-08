@@ -38,7 +38,8 @@ import (
 type FetchOptions struct {
 	// Refresh forces a round trip to the source. Without it, sources that
 	// cache (like Git) reuse the local copy so launches stay fast and work
-	// offline.
+	// offline. A refresh that fails falls back to the cached copy and sets
+	// FetchResult.RefreshErr.
 	Refresh bool
 }
 
@@ -50,6 +51,10 @@ type FetchResult struct {
 	From string
 	// Notes carries warnings and decisions worth surfacing to the user.
 	Notes []string
+	// RefreshErr is why a requested refresh failed; Dir then holds the
+	// cached copy. Callers that must not run on a stale pack (a sync
+	// command) return it as their error.
+	RefreshErr error
 }
 
 // Source materializes a defaults pack into a local directory.
@@ -82,26 +87,42 @@ func (l localSource) Describe() string { return "local:" + string(l) }
 // It shells out to the git binary so existing SSH keys, credential helpers
 // and proxy configuration apply unchanged. The ref may be a branch, tag or
 // commit; empty means the remote's default branch. Pin a ref in production
-// for reproducible launches.
+// for reproducible launches. Each URL and ref pair gets its own cache
+// directory, so several refs of one repo can be used side by side.
 //
 // The URL may carry a "#subdir" suffix (e.g. "github.com/acme/defaults#pack")
 // to root the pack at a subdirectory of the repo, keeping room for a README
 // and CI config at the top level.
 func Git(url, ref string) Source {
+	return GitWith(url, ref, GitOptions{})
+}
+
+// GitOptions configures a git-backed pack source. The zero value behaves
+// like Git.
+type GitOptions struct {
+	// CacheDir is the directory that holds pack checkouts, one
+	// subdirectory per URL and ref. Empty means
+	// <user cache dir>/coding-agent-wrapper/git.
+	CacheDir string
+}
+
+// GitWith is Git with options. It accepts the same URL forms as Git,
+// including the "#subdir" suffix.
+func GitWith(url, ref string, o GitOptions) Source {
 	sub := ""
 	if i := strings.Index(url, "#"); i >= 0 {
 		url, sub = url[:i], url[i+1:]
 	}
-	base, err := os.UserCacheDir()
-	if err != nil {
-		base = os.TempDir()
+	root := o.CacheDir
+	if root == "" {
+		base, err := os.UserCacheDir()
+		if err != nil {
+			base = os.TempDir()
+		}
+		root = filepath.Join(base, "coding-agent-wrapper", "git")
 	}
-	return gitSource{url: url, ref: ref, dir: filepath.Join(base, "coding-agent-wrapper", "git", cacheKey(url)), sub: sub}
-}
-
-// GitWithCache is Git with an explicit cache directory and no subdirectory.
-func GitWithCache(url, ref, cacheDir string) Source {
-	return gitSource{url: url, ref: ref, dir: cacheDir}
+	dir := filepath.Join(root, cacheKey(url+"\x00"+ref))
+	return gitSource{url: url, ref: ref, dir: dir, sub: sub}
 }
 
 type gitSource struct {
@@ -122,8 +143,8 @@ func (g gitSource) Describe() string {
 	return s
 }
 
-func cacheKey(url string) string {
-	sum := sha1.Sum([]byte(url))
+func cacheKey(key string) string {
+	sum := sha1.Sum([]byte(key))
 	return hex.EncodeToString(sum[:8])
 }
 

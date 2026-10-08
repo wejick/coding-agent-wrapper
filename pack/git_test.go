@@ -2,11 +2,13 @@ package pack
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func gitCmd(t *testing.T, dir string, args ...string) {
@@ -42,8 +44,7 @@ func TestGitCloneRefreshAndCache(t *testing.T) {
 	origin := initRepo(t)
 	commitFile(t, origin, "v1.txt", "one")
 
-	cache := filepath.Join(t.TempDir(), "cache")
-	src := GitWithCache(origin, "", cache)
+	src := gitAt(origin, "", t.TempDir())
 	ctx := context.Background()
 
 	res, err := src.Fetch(ctx, FetchOptions{})
@@ -53,9 +54,8 @@ func TestGitCloneRefreshAndCache(t *testing.T) {
 	if res.From != "git" {
 		t.Fatalf("first fetch: from=%s want git", res.From)
 	}
-	data, err := os.ReadFile(filepath.Join(cache, "v1.txt"))
-	if err != nil || string(data) != "one" {
-		t.Fatalf("cloned content: %q err=%v", data, err)
+	if got := readPackFile(t, res.Dir, "v1.txt"); got != "one" {
+		t.Fatalf("cloned content: %q", got)
 	}
 
 	res, err = src.Fetch(ctx, FetchOptions{})
@@ -74,8 +74,8 @@ func TestGitCloneRefreshAndCache(t *testing.T) {
 	if res.From != "git" {
 		t.Fatalf("refresh: from=%s want git", res.From)
 	}
-	if _, err := os.Stat(filepath.Join(cache, "v2.txt")); err != nil {
-		t.Fatalf("refresh did not pick up new commit: %v", err)
+	if readPackFile(t, res.Dir, "v2.txt") != "two" {
+		t.Fatal("refresh did not pick up new commit")
 	}
 }
 
@@ -85,15 +85,15 @@ func TestGitRefPin(t *testing.T) {
 	gitCmd(t, origin, "branch", "--quiet", "stable")
 	commitFile(t, origin, "v2.txt", "two")
 
-	cache := filepath.Join(t.TempDir(), "cache")
-	src := GitWithCache(origin, "stable", cache)
-	if _, err := src.Fetch(context.Background(), FetchOptions{}); err != nil {
+	src := gitAt(origin, "stable", t.TempDir())
+	res, err := src.Fetch(context.Background(), FetchOptions{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cache, "v1.txt")); err != nil {
-		t.Fatal(err)
+	if readPackFile(t, res.Dir, "v1.txt") != "one" {
+		t.Fatal("pinned ref missing its own commit")
 	}
-	if _, err := os.Stat(filepath.Join(cache, "v2.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(res.Dir, "v2.txt")); !os.IsNotExist(err) {
 		t.Fatal("pinned ref should not include commits after the branch point")
 	}
 
@@ -102,7 +102,7 @@ func TestGitRefPin(t *testing.T) {
 	if _, err := src.Fetch(context.Background(), FetchOptions{Refresh: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(cache, "v3.txt")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(res.Dir, "v3.txt")); !os.IsNotExist(err) {
 		t.Fatal("refresh followed main instead of pinned branch")
 	}
 }
@@ -111,14 +111,16 @@ func TestGitOfflineFallsBackToCache(t *testing.T) {
 	origin := initRepo(t)
 	commitFile(t, origin, "v1.txt", "one")
 
-	cache := filepath.Join(t.TempDir(), "cache")
-	if _, err := GitWithCache(origin, "", cache).Fetch(context.Background(), FetchOptions{}); err != nil {
+	src := gitAt(origin, "", t.TempDir())
+	if _, err := src.Fetch(context.Background(), FetchOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	// Same cache dir, but an unresolvable ref: refresh fails and the fetch
-	// must fall back to the cached copy with a note.
-	broken := GitWithCache(origin, "no-such-ref", cache)
-	res, err := broken.Fetch(context.Background(), FetchOptions{Refresh: true})
+	// The remote disappears: the refresh fails and the fetch falls back to
+	// the cached copy with a note.
+	if err := os.Rename(origin, origin+"-gone"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := src.Fetch(context.Background(), FetchOptions{Refresh: true})
 	if err != nil {
 		t.Fatalf("offline fetch should fall back to cache: %v", err)
 	}
@@ -132,20 +134,19 @@ func TestGitSubdirPack(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(repo, "defaults"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	version := `{"name": "sub", "version": "1.0"}`
-	if err := os.WriteFile(filepath.Join(repo, "defaults", "version.json"), []byte(version), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gitCmd(t, repo, "add", "-A")
-	gitCmd(t, repo, "commit", "--quiet", "-m", "subdir")
+	commitFile(t, repo, "defaults/version.json", `{"name": "sub", "version": "1.0"}`)
+	isolateCache(t)
 
 	src := Git(repo+"#defaults", "")
 	res, err := src.Fetch(context.Background(), FetchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(res.Dir, "defaults") {
+	if filepath.Base(res.Dir) != "defaults" {
 		t.Fatalf("pack dir = %s, want the #defaults subdirectory", res.Dir)
+	}
+	if !strings.HasSuffix(src.Describe(), "#defaults") {
+		t.Fatalf("Describe() = %s, want the #defaults suffix", src.Describe())
 	}
 	p, err := Load(res.Dir, src.Describe())
 	if err != nil {
@@ -164,8 +165,201 @@ func TestGitSubdirPack(t *testing.T) {
 
 func TestGitMissingRepoErrors(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "not-a-repo")
-	_, err := GitWithCache(missing, "", filepath.Join(t.TempDir(), "cache")).Fetch(context.Background(), FetchOptions{})
+	_, err := gitAt(missing, "", t.TempDir()).Fetch(context.Background(), FetchOptions{})
 	if err == nil {
 		t.Fatal("expected error cloning missing repo")
+	}
+}
+
+// gitAt is a git source cached under root.
+func gitAt(url, ref, root string) Source {
+	return GitWith(url, ref, GitOptions{CacheDir: root})
+}
+
+// isolateCache points the user cache dir at a temp directory so Git()
+// never touches the real cache.
+func isolateCache(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+}
+
+func readPackFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// assertEmpty fails when dir holds anything, such as a failed clone's
+// leftovers.
+func assertEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("%s holds %d entries, first %s", dir, len(entries), entries[0].Name())
+	}
+}
+
+func TestGitSwitchingRefsServesRequestedRef(t *testing.T) {
+	origin := initRepo(t)
+	commitFile(t, origin, "which.txt", "stable")
+	gitCmd(t, origin, "branch", "--quiet", "stable")
+	gitCmd(t, origin, "checkout", "--quiet", "-b", "feature")
+	commitFile(t, origin, "which.txt", "feature")
+	root := t.TempDir()
+	ctx := context.Background()
+
+	dirs := map[string]string{}
+	for _, ref := range []string{"stable", "feature", "stable"} {
+		res, err := gitAt(origin, ref, root).Fetch(ctx, FetchOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := readPackFile(t, res.Dir, "which.txt"); got != ref {
+			t.Fatalf("ref %s: which.txt = %q", ref, got)
+		}
+		dirs[ref] = res.Dir
+	}
+	if dirs["stable"] == dirs["feature"] {
+		t.Fatal("two refs of one repo must be cached side by side")
+	}
+}
+
+func TestGitFailedCloneLeavesNoCache(t *testing.T) {
+	origin := initRepo(t)
+	commitFile(t, origin, "v1.txt", "one")
+	root := t.TempDir()
+	src := gitAt(origin, "no-such-ref", root)
+
+	for i := 0; i < 2; i++ {
+		_, err := src.Fetch(context.Background(), FetchOptions{})
+		if err == nil || !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("fetch %d: expected ref not found, got %v", i+1, err)
+		}
+	}
+	assertEmpty(t, root)
+}
+
+func TestGitConcurrentFirstFetches(t *testing.T) {
+	origin := initRepo(t)
+	for i := 0; i < 20; i++ {
+		commitFile(t, origin, fmt.Sprintf("f%02d.txt", i), "x")
+	}
+	root := t.TempDir()
+
+	const n = 8
+	type result struct {
+		dir string
+		err error
+	}
+	results := make(chan result, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			<-start
+			res, err := gitAt(origin, "", root).Fetch(context.Background(), FetchOptions{})
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			results <- result{dir: res.Dir}
+		}()
+	}
+	close(start)
+	for i := 0; i < n; i++ {
+		r := <-results
+		if r.err != nil {
+			t.Fatalf("concurrent first fetch failed: %v", r.err)
+		}
+		// Every caller sees a complete checkout.
+		if readPackFile(t, r.dir, "f19.txt") != "x" {
+			t.Fatalf("incomplete checkout at %s", r.dir)
+		}
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want only the checkout, got %d entries", len(entries))
+	}
+}
+
+func TestStaleAfterCloneAndRefresh(t *testing.T) {
+	repo := initRepo(t)
+	if err := os.MkdirAll(filepath.Join(repo, "pack"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, repo, "pack/version.json", `{"version":"1"}`)
+	src := gitAt(repo+"#pack", "", t.TempDir())
+
+	res, err := src.Fetch(context.Background(), FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkout := filepath.Dir(res.Dir)
+	for _, dir := range []string{checkout, res.Dir} {
+		if Stale(dir, time.Hour) {
+			t.Fatalf("freshly cloned pack reported stale (dir %s)", dir)
+		}
+	}
+	if !Stale(res.Dir, 0) {
+		t.Fatal("maxAge 0 must always be stale")
+	}
+
+	// Backdate the sync, then refresh: no longer stale.
+	backdate(t, checkout)
+	if !Stale(res.Dir, time.Hour) {
+		t.Fatal("pack synced two hours ago should be stale for maxAge 1h")
+	}
+	if _, err := src.Fetch(context.Background(), FetchOptions{Refresh: true}); err != nil {
+		t.Fatal(err)
+	}
+	if Stale(res.Dir, time.Hour) {
+		t.Fatal("refreshed pack reported stale")
+	}
+	if !Stale(t.TempDir(), time.Hour) {
+		t.Fatal("a directory that is not a checkout is always stale")
+	}
+}
+
+// backdate moves the checkout's last sync two hours into the past.
+func backdate(t *testing.T, checkout string) {
+	t.Helper()
+	old := time.Now().Add(-2 * time.Hour)
+	if err := os.Chtimes(filepath.Join(checkout, ".git", syncMarker), old, old); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGitRefreshOfDeletedBranchKeepsCacheWithNote(t *testing.T) {
+	origin := initRepo(t)
+	commitFile(t, origin, "v1.txt", "one")
+	gitCmd(t, origin, "branch", "--quiet", "feature")
+	src := gitAt(origin, "feature", t.TempDir())
+	ctx := context.Background()
+	res, err := src.Fetch(ctx, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	backdate(t, res.Dir)
+
+	gitCmd(t, origin, "branch", "--quiet", "-D", "feature")
+	res, err = src.Fetch(ctx, FetchOptions{Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.From != "cache" || len(res.Notes) == 0 || !strings.Contains(res.Notes[0], "not found") {
+		t.Fatalf("a deleted branch must not refresh onto the stale local branch, got %+v", res)
+	}
+	if !Stale(res.Dir, time.Hour) {
+		t.Fatal("a failed refresh must not count as a sync")
 	}
 }

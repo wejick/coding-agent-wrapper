@@ -161,3 +161,39 @@ func TestCacheDirIsStable(t *testing.T) {
 		t.Fatalf("unexpected cache dir %q", a)
 	}
 }
+
+func TestConcurrentWritesOfSameContent(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte(`{"same":true}`)
+
+	const n = 32
+	errs := make(chan error, n)
+	paths := make(chan string, n)
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		go func() {
+			<-start
+			path, err := Write(dir, "settings", data)
+			errs <- err
+			paths <- path
+		}()
+	}
+	close(start)
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent write failed: %v", err)
+		}
+		path := <-paths
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != string(data) {
+			t.Fatalf("%s: %q err=%v", path, got, err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("want one generated file and no temp files, got %d entries", len(entries))
+	}
+}
