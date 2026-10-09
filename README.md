@@ -126,13 +126,6 @@ npm/Go installs, MDM). On UNIX, `Run` execs in place: signals, exit codes and
 terminal behavior are the agent's own. Employees type `acme claude`; the
 pack URL and ref are baked in, so there is nothing for them to configure.
 
-To show how old a cached pack is, call `pack.LastSynced(dir)` with the
-directory a fetch returned. It returns the time of the clone or of the latest
-successful refresh. A refresh that fails (offline, deleted ref) leaves it
-unchanged, so a laptop that has been offline for a week reports a week-old
-sync. `pack.Stale(dir, maxAge)` compares the same time against a threshold,
-and `wr doctor` prints it as `synced:`.
-
 ## Deep dives
 
 | Doc | Contents |
