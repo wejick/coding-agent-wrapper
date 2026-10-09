@@ -228,9 +228,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
-// Skills implements wrapper.Adapter: the skills in the org plugin's
-// default skills/ directory (claude/plugin/skills). Extra skill paths
-// declared in the plugin's plugin.json are not listed.
+// Skills lists the org plugin's skills/ directory.
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
 }

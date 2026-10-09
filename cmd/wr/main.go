@@ -142,8 +142,7 @@ func source() (pack.Source, error) {
 
 // options never asks the launch to refresh: --refresh is handled up front
 // by refresh so that a failure stops the command instead of becoming a
-// note. fetched is the pack that fetch produced; nil lets the launch use
-// the cached pack.
+// note.
 func options(agent string, args []string, src pack.Source, fetched *pack.FetchResult) wrapper.Options {
 	return wrapper.Options{
 		Agent:      agent,

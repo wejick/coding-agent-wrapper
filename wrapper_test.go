@@ -63,8 +63,6 @@ func TestPrepareEndToEnd(t *testing.T) {
 	}
 }
 
-// fetchFails is a pack source whose Fetch always errors, to prove Prepare
-// does not fetch when given an already-fetched pack.
 type fetchFails struct{}
 
 func (fetchFails) Fetch(context.Context, pack.FetchOptions) (*pack.FetchResult, error) {

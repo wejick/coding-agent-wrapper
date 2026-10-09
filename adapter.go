@@ -38,17 +38,12 @@ type Adapter interface {
 	Locate() (string, error)
 	// Build computes the launch for the given pack.
 	Build(ctx context.Context, p *pack.Pack, o BuildOptions) (*Launch, error)
-	// Skills returns the skills the pack provides for this agent, read
-	// from the same location Build points the agent at. It returns nil
-	// when the adapter has no skill support.
+	// Skills returns the pack's skills for this agent, or nil if unsupported.
 	Skills(p *pack.Pack) Skills
 }
 
-// Skills is an agent's view of the skills in one pack. Adapters return it
-// from Adapter.Skills, and new skill operations are added as methods here.
+// Skills is an agent's view of the skills in one pack.
 type Skills interface {
-	// List returns every skill, with its name, description and SKILL.md
-	// path.
 	List() ([]pack.Skill, error)
 }
 

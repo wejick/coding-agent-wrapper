@@ -7,23 +7,16 @@ import (
 	"strings"
 )
 
-// Skill is one skill a pack provides, read from its SKILL.md.
+// Skill is read from a SKILL.md frontmatter.
 type Skill struct {
-	// Name and Description come from the SKILL.md frontmatter. Each is
-	// empty when the frontmatter does not set it.
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	// Path is the skill's SKILL.md file.
-	Path string `json:"path"`
+	Path        string `json:"path"`
 }
 
-// SkillDirs is the list of directories an agent loads SKILL.md skills
-// from. It implements wrapper.Skills, so an adapter whose agent uses
-// SKILL.md files returns one from Adapter.Skills.
+// SkillDirs implements wrapper.Skills over directories of SKILL.md files.
 type SkillDirs []string
 
-// List returns the skills in every directory, in directory order. A
-// missing directory has no skills.
 func (d SkillDirs) List() ([]Skill, error) {
 	var skills []Skill
 	for _, dir := range d {
@@ -36,12 +29,8 @@ func (d SkillDirs) List() ([]Skill, error) {
 	return skills, nil
 }
 
-// readSkills lists the skills under dir: every SKILL.md at any depth, the
-// way OpenCode's "skills/**/SKILL.md" scan finds them, so skills can be
-// grouped in subdirectories (skills/team/review/SKILL.md). Each SKILL.md
-// opens with YAML frontmatter. Symlinked directories are followed, hidden
-// entries are skipped, and a missing dir has no skills. Skills come back
-// in path order.
+// readSkills finds every SKILL.md under dir, following symlinks and
+// skipping hidden entries.
 func readSkills(dir string) ([]Skill, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
@@ -50,7 +39,6 @@ func readSkills(dir string) ([]Skill, error) {
 	seen := map[string]bool{}
 	var walk func(dir string) error
 	walk = func(dir string) error {
-		// A symlink loop would otherwise recurse forever.
 		real, err := filepath.EvalSymlinks(dir)
 		if err != nil {
 			return err
@@ -68,9 +56,9 @@ func readSkills(dir string) ([]Skill, error) {
 				continue
 			}
 			path := filepath.Join(dir, e.Name())
-			info, err := os.Stat(path) // follows symlinks
+			info, err := os.Stat(path)
 			if err != nil {
-				continue // dangling symlink
+				continue
 			}
 			if info.IsDir() {
 				if err := walk(path); err != nil {
@@ -96,10 +84,7 @@ func readSkills(dir string) ([]Skill, error) {
 	return skills, nil
 }
 
-// frontmatter reads the top-level "key: value" pairs of a leading
-// "---"-delimited YAML block. It covers what skill files use: plain and
-// quoted scalars, values continued on indented lines, and "|" and ">"
-// block scalars. It returns nil when there is no complete block.
+// frontmatter parses the top-level keys of a leading "---" YAML block.
 func frontmatter(doc string) map[string]string {
 	doc = strings.TrimPrefix(doc, "\ufeff")
 	lines := strings.Split(strings.ReplaceAll(doc, "\r\n", "\n"), "\n")
@@ -120,7 +105,6 @@ func frontmatter(doc string) map[string]string {
 			continue
 		}
 		value = strings.TrimSpace(value)
-		// Indented lines that follow belong to this value.
 		var more []string
 		for i+1 < len(lines) && (strings.TrimSpace(lines[i+1]) == "" || lines[i+1][0] == ' ' || lines[i+1][0] == '\t') {
 			i++
@@ -132,7 +116,6 @@ func frontmatter(doc string) map[string]string {
 		case strings.HasPrefix(value, ">"):
 			value = strings.Join(strings.Fields(strings.Join(more, " ")), " ")
 		default:
-			// " #" starts a comment in a plain scalar.
 			if !strings.HasPrefix(value, "\"") && !strings.HasPrefix(value, "'") {
 				if i := strings.Index(value, " #"); i >= 0 {
 					value = strings.TrimSpace(value[:i])

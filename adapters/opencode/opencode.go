@@ -248,9 +248,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
-// Skills implements wrapper.Adapter: every SKILL.md under the org config
-// dir's skill/ and skills/ directories, matching OpenCode's own
-// "{skill,skills}/**/SKILL.md" scan of OPENCODE_CONFIG_DIR.
+// Skills lists config/skill and config/skills, the directories OpenCode scans.
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	dir := filepath.Join(p.AgentDir(DirName), DirConfig)
 	return pack.SkillDirs{filepath.Join(dir, "skill"), filepath.Join(dir, "skills")}

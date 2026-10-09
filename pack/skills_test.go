@@ -27,7 +27,6 @@ func TestReadSkills(t *testing.T) {
 	write("bom", "\ufeff---\nname: bom # saved by a Windows editor\ndescription: Has a BOM.\n---\n")
 	write("team/nested", "---\nname: nested\ndescription: Grouped under team/.\n---\n")
 	write(".hidden", "---\nname: hidden\n---\n")
-	// A skill shared by symlink, plus a loop that must not recurse forever.
 	shared := filepath.Join(t.TempDir(), "shared")
 	if err := os.MkdirAll(shared, 0o755); err != nil {
 		t.Fatal(err)

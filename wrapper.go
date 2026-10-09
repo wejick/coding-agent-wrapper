@@ -58,11 +58,7 @@ type Options struct {
 	// Refresh forces a pack round trip before launching instead of using
 	// the cached copy.
 	Refresh bool
-	// Fetched is a pack the caller already fetched from Pack, for example
-	// after checking pack.Stale and refreshing. Prepare then uses it as
-	// is and does not fetch again, so Launch.Source and Launch.Notes
-	// describe this fetch. Refresh is ignored when Fetched is set, and
-	// the launch notes say so.
+	// Fetched, when set, is used instead of fetching Pack; Refresh is ignored.
 	Fetched *pack.FetchResult
 	// SkipPolicy skips the pack's policy layer and stops forcing pack env
 	// defaults, so the launch runs with soft defaults only. The zero
@@ -93,9 +89,8 @@ type Launch struct {
 	PackVersion map[string]any `json:"pack_version,omitempty"`
 }
 
-// Prepare resolves the agent, fetches the defaults pack (unless
-// opts.Fetched carries one) and computes the launch without running
-// anything. Use it for diagnostics, tests and
+// Prepare resolves the agent, fetches the defaults pack and computes the
+// launch without running anything. Use it for diagnostics, tests and
 // tooling that needs to know exactly what would execute; Run is Prepare
 // followed by Launch.Exec.
 func Prepare(ctx context.Context, opts Options) (*Launch, error) {
