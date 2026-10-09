@@ -158,18 +158,32 @@ func git(ctx context.Context, dir string, args ...string) (string, error) {
 	return trimmed, nil
 }
 
-// Stale reports whether a git-backed pack last synced with its remote
-// (cloned or refreshed) longer ago than maxAge. dir may be the checkout or
-// a pack subdirectory inside it. Sources can use it to decide when Refresh
-// is worth a round trip (e.g. refresh on launch at most hourly).
-func Stale(dir string, maxAge time.Duration) bool {
+// LastSynced returns when a git-backed pack last matched its remote: the
+// time of the clone or of the latest successful refresh. A refresh that
+// fails (offline, deleted ref) leaves it unchanged, so a machine that has
+// been offline for a week reports a week-old sync. dir may be the checkout
+// or a pack subdirectory inside it. ok is false when dir is not inside a
+// git checkout or the checkout has no recorded sync.
+func LastSynced(dir string) (t time.Time, ok bool) {
 	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
 		if isCheckout(d) {
 			info, err := os.Stat(filepath.Join(d, ".git", syncMarker))
-			return err != nil || time.Since(info.ModTime()) > maxAge
+			if err != nil {
+				return time.Time{}, false
+			}
+			return info.ModTime(), true
 		}
 		if filepath.Dir(d) == d {
-			return true
+			return time.Time{}, false
 		}
 	}
+}
+
+// Stale reports whether a git-backed pack last synced with its remote
+// (cloned or refreshed) longer ago than maxAge, or has no recorded sync.
+// Sources can use it to decide when Refresh is worth a round trip (e.g.
+// refresh on launch at most hourly). Use LastSynced to show the age.
+func Stale(dir string, maxAge time.Duration) bool {
+	t, ok := LastSynced(dir)
+	return !ok || time.Since(t) > maxAge
 }

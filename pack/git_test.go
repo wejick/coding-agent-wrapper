@@ -330,6 +330,49 @@ func TestStaleAfterCloneAndRefresh(t *testing.T) {
 	}
 }
 
+func TestLastSyncedIgnoresFailedRefresh(t *testing.T) {
+	origin := initRepo(t)
+	commitFile(t, origin, "v1.txt", "one")
+	src := gitAt(origin, "", t.TempDir())
+	ctx := context.Background()
+
+	before := time.Now().Add(-time.Second)
+	res, err := src.Fetch(ctx, FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	synced, ok := LastSynced(res.Dir)
+	if !ok || synced.Before(before) {
+		t.Fatalf("clone must record a sync time, got %v ok=%v", synced, ok)
+	}
+
+	backdate(t, res.Dir)
+	old, _ := LastSynced(res.Dir)
+	if time.Since(old) < time.Hour {
+		t.Fatalf("backdate did not take effect: %v", old)
+	}
+
+	// An unreachable remote fails the refresh and keeps the old time.
+	if err := os.RemoveAll(origin); err != nil {
+		t.Fatal(err)
+	}
+	res, err = src.Fetch(ctx, FetchOptions{Refresh: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.RefreshErr == nil {
+		t.Fatal("refresh against a missing remote should fail")
+	}
+	got, ok := LastSynced(res.Dir)
+	if !ok || !got.Equal(old) {
+		t.Fatalf("failed refresh changed the sync time: %v -> %v", old, got)
+	}
+
+	if _, ok := LastSynced(t.TempDir()); ok {
+		t.Fatal("a directory outside a checkout has no sync time")
+	}
+}
+
 // backdate moves the checkout's last sync two hours into the past.
 func backdate(t *testing.T, checkout string) {
 	t.Helper()
