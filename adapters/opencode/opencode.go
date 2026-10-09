@@ -248,6 +248,12 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
+// Skills lists config/skill and config/skills, the directories OpenCode scans.
+func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
+	dir := filepath.Join(p.AgentDir(DirName), DirConfig)
+	return pack.SkillDirs{filepath.Join(dir, "skill"), filepath.Join(dir, "skills")}
+}
+
 // globalConfigFiles lists the user's global config files in OpenCode's own
 // load order. Tests override the whole list with UserConfigPath.
 func (a *Adapter) globalConfigFiles() []string {

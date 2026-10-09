@@ -58,6 +58,8 @@ type Options struct {
 	// Refresh forces a pack round trip before launching instead of using
 	// the cached copy.
 	Refresh bool
+	// Fetched, when set, is used instead of fetching Pack; Refresh is ignored.
+	Fetched *pack.FetchResult
 	// SkipPolicy skips the pack's policy layer and stops forcing pack env
 	// defaults, so the launch runs with soft defaults only. The zero
 	// value enforces org policy.
@@ -102,15 +104,20 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	if opts.Pack == nil {
 		return nil, errors.New("wrapper: no defaults pack configured")
 	}
-	res, err := opts.Pack.Fetch(ctx, pack.FetchOptions{Refresh: opts.Refresh})
-	if err != nil {
-		return nil, err
+	res := opts.Fetched
+	if res == nil {
+		if res, err = opts.Pack.Fetch(ctx, pack.FetchOptions{Refresh: opts.Refresh}); err != nil {
+			return nil, err
+		}
 	}
 	p, err := pack.Load(res.Dir, opts.Pack.Describe())
 	if err != nil {
 		return nil, err
 	}
 	p.Notes = append(p.Notes, res.Notes...)
+	if opts.Fetched != nil && opts.Refresh {
+		p.Notes = append(p.Notes, "refresh not attempted: the caller passed an already-fetched pack")
+	}
 	launch, err := a.Build(ctx, p, BuildOptions{
 		Args:       opts.Args,
 		Env:        opts.Env,

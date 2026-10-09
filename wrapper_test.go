@@ -2,8 +2,10 @@ package wrapper_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,6 +60,60 @@ func TestPrepareEndToEnd(t *testing.T) {
 	}
 	if launch.PackVersion["name"] != "acme-defaults" {
 		t.Fatalf("pack version = %v", launch.PackVersion)
+	}
+}
+
+type fetchFails struct{}
+
+func (fetchFails) Fetch(context.Context, pack.FetchOptions) (*pack.FetchResult, error) {
+	return nil, errors.New("fetch called")
+}
+
+func (fetchFails) Describe() string { return "git:example.com/acme/defaults" }
+
+func TestPrepareUsesFetchedPack(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+
+	note := "refresh failed (offline); using cached pack"
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:   "claude",
+		Pack:    fetchFails{},
+		Fetched: &pack.FetchResult{Dir: "examples/pack", From: "cache", Notes: []string{note}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launch.Source != "git:example.com/acme/defaults (cache)" {
+		t.Fatalf("source = %q", launch.Source)
+	}
+	if !slices.Contains(launch.Notes, note) {
+		t.Fatalf("notes should carry the fetch's notes, got %v", launch.Notes)
+	}
+	if launch.PackVersion["name"] != "acme-defaults" {
+		t.Fatalf("pack version = %v", launch.PackVersion)
+	}
+}
+
+func TestPrepareNotesRefreshIgnoredWithFetchedPack(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+
+	fetched := &pack.FetchResult{Dir: "examples/pack", From: "cache"}
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:   "claude",
+		Pack:    fetchFails{},
+		Fetched: fetched,
+		Refresh: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(launch.Notes, "refresh not attempted: the caller passed an already-fetched pack") {
+		t.Fatalf("notes should say the refresh was skipped, got %v", launch.Notes)
+	}
+	if len(fetched.Notes) != 0 {
+		t.Fatalf("Prepare must not modify the caller's fetch result, got %v", fetched.Notes)
 	}
 }
 

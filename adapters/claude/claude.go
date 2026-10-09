@@ -228,6 +228,11 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
+// Skills lists the org plugin's skills/ directory.
+func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
+	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
+}
+
 // settingsFile is one settings layer on disk.
 type settingsFile struct {
 	label   string

@@ -317,3 +317,49 @@ func write(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestSkillsListsConfigDirSkills(t *testing.T) {
+	skills, err := opencode.New().Skills(testPack(t)).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 || skills[0].Name != "commit-style" || skills[0].Description == "" {
+		t.Fatalf("skills = %+v", skills)
+	}
+	want := filepath.Join("../../examples/pack", "opencode", "config", "skills", "commit-style", "SKILL.md")
+	if skills[0].Path != want {
+		t.Fatalf("path = %q, want %q", skills[0].Path, want)
+	}
+}
+
+func TestSkillsEmptyWithoutConfigDir(t *testing.T) {
+	skills, err := opencode.New().Skills(emptyPack(t)).List()
+	if err != nil || len(skills) != 0 {
+		t.Fatalf("skills = %+v, err = %v", skills, err)
+	}
+}
+
+func TestSkillsReadsSingularSkillDir(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"skill/review", "skills/commit-style"} {
+		dir := filepath.Join(root, "opencode", "config", rel)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: " + filepath.Base(rel) + "\ndescription: x\n---\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := pack.Load(root, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := opencode.New().Skills(p).List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 2 || skills[0].Name != "review" || skills[1].Name != "commit-style" {
+		t.Fatalf("skills = %+v", skills)
+	}
+}

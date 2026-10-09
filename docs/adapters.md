@@ -16,6 +16,15 @@ type Adapter interface {
 	Locate() (string, error)
 	// Build computes the launch for the given pack.
 	Build(ctx context.Context, p *pack.Pack, o BuildOptions) (*Launch, error)
+	// Skills returns the skills the pack provides for this agent, or nil
+	// when the adapter has no skill support.
+	Skills(p *pack.Pack) Skills
+}
+
+// Skills is an agent's view of the skills in one pack. New skill
+// operations are added as methods here.
+type Skills interface {
+	List() ([]pack.Skill, error)
 }
 ```
 
@@ -24,6 +33,14 @@ pack's `opencode/` directory) and returns everything needed to start the
 agent: resolved binary, final argv, full environment, generated files, and a
 human-readable `Notes` trail. `Run` = `Prepare` + `Exec`; adapters only own
 `Build`.
+
+`Skills` must read the same directories `Build` points the agent at. When
+the agent uses `SKILL.md` files, return a `pack.SkillDirs` listing those
+directories: its `List` finds every `SKILL.md` under each one and reads
+the frontmatter. The Claude adapter returns
+`pack.SkillDirs{<pack>/claude/plugin/skills}`. An adapter for an agent
+without skills returns nil. See [embedding.md](embedding.md) for how
+callers use it.
 
 ## Rules every adapter should follow
 
