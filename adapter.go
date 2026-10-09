@@ -38,14 +38,18 @@ type Adapter interface {
 	Locate() (string, error)
 	// Build computes the launch for the given pack.
 	Build(ctx context.Context, p *pack.Pack, o BuildOptions) (*Launch, error)
+	// Skills returns the skills the pack provides for this agent, read
+	// from the same location Build points the agent at. It returns nil
+	// when the adapter has no skill support.
+	Skills(p *pack.Pack) Skills
 }
 
-// SkillLister is implemented by adapters that can list the skills a pack
-// provides for their agent. Skills reads the same pack location the
-// launch loads, so the list matches what the agent will see. Check for it
-// with a type assertion on the adapter returned by Lookup.
-type SkillLister interface {
-	Skills(p *pack.Pack) ([]pack.Skill, error)
+// Skills is an agent's view of the skills in one pack. Adapters return it
+// from Adapter.Skills, and new skill operations are added as methods here.
+type Skills interface {
+	// List returns every skill, with its name, description and SKILL.md
+	// path.
+	List() ([]pack.Skill, error)
 }
 
 var (

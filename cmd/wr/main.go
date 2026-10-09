@@ -318,8 +318,8 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 			ls.Files = launch.Files
 			ls.Notes = launch.Notes
 			a, _ := wrapper.Lookup(name)
-			if sl, ok := a.(wrapper.SkillLister); ok {
-				if ls.Skills, err = sl.Skills(p); err != nil {
+			if skills := a.Skills(p); skills != nil {
+				if ls.Skills, err = skills.List(); err != nil {
 					ls.Notes = append(ls.Notes, fmt.Sprintf("org skills could not be listed: %v", err))
 				}
 			}

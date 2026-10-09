@@ -48,7 +48,7 @@ func TestReadSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ReadSkills(dir)
+	got, err := readSkills(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestReadSkills(t *testing.T) {
 }
 
 func TestReadSkillsMissingDir(t *testing.T) {
-	got, err := ReadSkills(filepath.Join(t.TempDir(), "nope"))
+	got, err := readSkills(filepath.Join(t.TempDir(), "nope"))
 	if err != nil || got != nil {
 		t.Fatalf("got %v, %v; want no skills and no error", got, err)
 	}

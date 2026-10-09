@@ -14,7 +14,8 @@ launch time, without modifying user or project configuration.
 
 ```
 wrapper.go              public API: Options, Launch, Prepare, Run
-adapter.go              Adapter interface + registry (Register, Lookup, Agents)
+adapter.go              Adapter and Skills interfaces + registry (Register,
+                        Lookup, Agents)
 resolve.go              PATH resolution that never recurses into the wrapper
 exec_unix.go            in-place exec (syscall.Exec), the happy path on UNIX
 exec_other.go           fork/exec fallback for non-UNIX
@@ -23,7 +24,7 @@ pack/
   git.go                git-backed distribution: clone, refresh, ref pinning,
                         offline fallback, #subdir roots
   merge.go              semantic JSON deep-merge (union arrays) + env merging
-  skills.go             skill listing: SKILL.md frontmatter (name, description)
+  skills.go             SkillDirs: lists SKILL.md skills (name, description)
 adapters/claude/
   claude.go             Claude Code adapter: builds the launch from the pack
   claude_test.go        asserts on computed launches and merged settings
@@ -42,7 +43,7 @@ docs/
   config-layers.md      the configuration layering model (canonical reference)
   adapters.md           how to add an agent adapter
   embedding.md          caller-side refresh policy (Options.Fetched) and
-                        listing pack skills (SkillLister)
+                        listing pack skills (Adapter.Skills)
 ```
 
 ## Commands

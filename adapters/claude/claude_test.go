@@ -463,7 +463,7 @@ func TestLocateFailsWithoutBinary(t *testing.T) {
 }
 
 func TestSkillsListsPluginSkills(t *testing.T) {
-	skills, err := claude.New().Skills(testPack(t))
+	skills, err := claude.New().Skills(testPack(t)).List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +481,7 @@ func TestSkillsEmptyWithoutPlugin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skills, err := claude.New().Skills(p)
+	skills, err := claude.New().Skills(p).List()
 	if err != nil || len(skills) != 0 {
 		t.Fatalf("skills = %+v, err = %v", skills, err)
 	}

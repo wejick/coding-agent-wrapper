@@ -17,13 +17,32 @@ type Skill struct {
 	Path string `json:"path"`
 }
 
-// ReadSkills lists the skills under dir: every SKILL.md at any depth, the
+// SkillDirs is the list of directories an agent loads SKILL.md skills
+// from. It implements wrapper.Skills, so an adapter whose agent uses
+// SKILL.md files returns one from Adapter.Skills.
+type SkillDirs []string
+
+// List returns the skills in every directory, in directory order. A
+// missing directory has no skills.
+func (d SkillDirs) List() ([]Skill, error) {
+	var skills []Skill
+	for _, dir := range d {
+		found, err := readSkills(dir)
+		if err != nil {
+			return nil, err
+		}
+		skills = append(skills, found...)
+	}
+	return skills, nil
+}
+
+// readSkills lists the skills under dir: every SKILL.md at any depth, the
 // way OpenCode's "skills/**/SKILL.md" scan finds them, so skills can be
 // grouped in subdirectories (skills/team/review/SKILL.md). Each SKILL.md
 // opens with YAML frontmatter. Symlinked directories are followed, hidden
 // entries are skipped, and a missing dir has no skills. Skills come back
 // in path order.
-func ReadSkills(dir string) ([]Skill, error) {
+func readSkills(dir string) ([]Skill, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
 	}

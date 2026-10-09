@@ -85,8 +85,6 @@ type Adapter struct {
 	CacheDir string
 }
 
-var _ wrapper.SkillLister = (*Adapter)(nil)
-
 // New returns an OpenCode adapter with defaults.
 func New() *Adapter { return &Adapter{} }
 
@@ -250,23 +248,12 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
-// Skills implements wrapper.SkillLister: every SKILL.md under the org
-// config dir's skill/ and skills/ directories, matching OpenCode's own
+// Skills implements wrapper.Adapter: every SKILL.md under the org config
+// dir's skill/ and skills/ directories, matching OpenCode's own
 // "{skill,skills}/**/SKILL.md" scan of OPENCODE_CONFIG_DIR.
-func (a *Adapter) Skills(p *pack.Pack) ([]pack.Skill, error) {
-	dir, ok := p.Subdir(DirName, DirConfig)
-	if !ok {
-		return nil, nil
-	}
-	var skills []pack.Skill
-	for _, name := range []string{"skill", "skills"} {
-		found, err := pack.ReadSkills(filepath.Join(dir, name))
-		if err != nil {
-			return nil, err
-		}
-		skills = append(skills, found...)
-	}
-	return skills, nil
+func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
+	dir := filepath.Join(p.AgentDir(DirName), DirConfig)
+	return pack.SkillDirs{filepath.Join(dir, "skill"), filepath.Join(dir, "skills")}
 }
 
 // globalConfigFiles lists the user's global config files in OpenCode's own

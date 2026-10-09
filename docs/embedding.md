@@ -50,8 +50,9 @@ notes record that.
 
 ## Listing the skills a pack provides
 
-Adapters that implement `wrapper.SkillLister` can list the org skills the
-pack gives their agent, read from the same directory the launch loads:
+`Adapter.Skills(p)` returns the agent's view of the skills in a pack, or
+nil when the adapter has no skill support. Its `List` method returns the
+org skills, read from the same directories the launch loads:
 
 | Agent | Skills directory |
 | --- | --- |
@@ -72,12 +73,12 @@ a, err := wrapper.Lookup("claude")
 if err != nil {
 	return err
 }
-if sl, ok := a.(wrapper.SkillLister); ok {
-	skills, err := sl.Skills(p)
+if skills := a.Skills(p); skills != nil {
+	list, err := skills.List()
 	if err != nil {
 		return err
 	}
-	for _, s := range skills {
+	for _, s := range list {
 		fmt.Printf("%s: %s (%s)\n", s.Name, s.Description, s.Path)
 	}
 }
@@ -86,6 +87,6 @@ if sl, ok := a.(wrapper.SkillLister); ok {
 Each `pack.Skill` carries the `name` and `description` from the
 `SKILL.md` frontmatter and the path of the file. `Name` or `Description`
 is empty when the frontmatter does not set it, so a pack's CI can check
-that every skill has both. An agent whose pack directory has no skills returns an empty
-list. `wr doctor` prints the list under each agent's launch as `skill:`
+that every skill has both. An agent whose pack directory has no skills
+returns an empty list. `wr doctor` prints the list under each agent's launch as `skill:`
 lines, and `wr doctor --json` includes it as `skills`.

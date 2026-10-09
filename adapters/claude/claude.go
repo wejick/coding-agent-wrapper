@@ -70,8 +70,6 @@ type Adapter struct {
 	CacheDir string
 }
 
-var _ wrapper.SkillLister = (*Adapter)(nil)
-
 // New returns a Claude Code adapter with defaults.
 func New() *Adapter { return &Adapter{} }
 
@@ -230,15 +228,11 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
-// Skills implements wrapper.SkillLister: the skills in the org plugin's
-// default skills/ directory (claude/plugin/skills/<name>/SKILL.md). Extra
-// skill paths declared in the plugin's plugin.json are not listed.
-func (a *Adapter) Skills(p *pack.Pack) ([]pack.Skill, error) {
-	dir, ok := p.Subdir(DirName, DirPlugin)
-	if !ok {
-		return nil, nil
-	}
-	return pack.ReadSkills(filepath.Join(dir, "skills"))
+// Skills implements wrapper.Adapter: the skills in the org plugin's
+// default skills/ directory (claude/plugin/skills). Extra skill paths
+// declared in the plugin's plugin.json are not listed.
+func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
+	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
 }
 
 // settingsFile is one settings layer on disk.

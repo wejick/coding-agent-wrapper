@@ -319,7 +319,7 @@ func write(t *testing.T, content string) string {
 }
 
 func TestSkillsListsConfigDirSkills(t *testing.T) {
-	skills, err := opencode.New().Skills(testPack(t))
+	skills, err := opencode.New().Skills(testPack(t)).List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestSkillsListsConfigDirSkills(t *testing.T) {
 }
 
 func TestSkillsEmptyWithoutConfigDir(t *testing.T) {
-	skills, err := opencode.New().Skills(emptyPack(t))
+	skills, err := opencode.New().Skills(emptyPack(t)).List()
 	if err != nil || len(skills) != 0 {
 		t.Fatalf("skills = %+v, err = %v", skills, err)
 	}
@@ -355,7 +355,7 @@ func TestSkillsReadsSingularSkillDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	skills, err := opencode.New().Skills(p)
+	skills, err := opencode.New().Skills(p).List()
 	if err != nil {
 		t.Fatal(err)
 	}
