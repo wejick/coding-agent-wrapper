@@ -17,6 +17,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	wrapper "github.com/wejick/coding-agent-wrapper"
 	"github.com/wejick/coding-agent-wrapper/adapters/claude"
@@ -194,10 +195,12 @@ type agentStatus struct {
 }
 
 type packStatus struct {
-	Source  string   `json:"source"`
-	From    string   `json:"from,omitempty"`
-	Dir     string   `json:"dir,omitempty"`
-	Head    string   `json:"head,omitempty"`
+	Source string `json:"source"`
+	From   string `json:"from,omitempty"`
+	Dir    string `json:"dir,omitempty"`
+	Head   string `json:"head,omitempty"`
+	// Synced is when a git pack last matched its remote (RFC 3339).
+	Synced  string   `json:"synced,omitempty"`
 	Version string   `json:"version,omitempty"`
 	Notes   []string `json:"notes,omitempty"`
 	Error   string   `json:"error,omitempty"`
@@ -292,6 +295,9 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 	}
 	ps.From, ps.Dir = res.From, res.Dir
 	ps.Head = pack.HeadInfo(ctx, res.Dir)
+	if t, ok := pack.LastSynced(res.Dir); ok {
+		ps.Synced = t.UTC().Format(time.RFC3339)
+	}
 	ps.Version = p.ShortVersion()
 	ps.Notes = append(res.Notes, p.Notes...)
 
@@ -335,6 +341,9 @@ func printDoctor(r doctorReport) {
 			fmt.Printf("  from:    %s\n", r.Pack.From)
 			fmt.Printf("  dir:     %s\n", r.Pack.Dir)
 			fmt.Printf("  head:    %s\n", r.Pack.Head)
+			if r.Pack.Synced != "" {
+				fmt.Printf("  synced:  %s\n", r.Pack.Synced)
+			}
 			fmt.Printf("  version: %s\n", r.Pack.Version)
 			for _, note := range r.Pack.Notes {
 				fmt.Println("  note:    " + note)

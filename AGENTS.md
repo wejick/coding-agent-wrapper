@@ -128,5 +128,11 @@ review replies.
   imports are not aliased except `wrapper` for the root package.
 - Notes and doctor output are user-facing: sentence case, concrete paths,
   no jargon.
-- Public API changes update `README.md` and the relevant `docs/` file in
-  the same commit.
+- Public API changes update the relevant `docs/` file in the same commit.
+  `README.md` is not updated for every change. Touch it only for big
+  features that give users direct value they need to know about up front
+  (a new agent adapter, a new command, a new distribution model). Small
+  additions such as a helper function or a new `doctor` field stay in
+  `docs/` and the code comments.
+- Commit messages and PR descriptions carry no `Co-Authored-By`, session
+  link or "Generated with" trailers. Write the message and stop.
