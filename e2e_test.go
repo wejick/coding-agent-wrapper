@@ -96,13 +96,41 @@ func controlledHome(t *testing.T, userSettings string) string {
 	return home
 }
 
+// packAbs returns a copy of the example pack without its tools.json, so
+// launches do not run the tools installed on the test machine. Tests of
+// required tools write their own tools.json.
 func packAbs(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs("examples/pack")
-	if err != nil {
+	dst := t.TempDir()
+	copyPack(t, "examples/pack", dst)
+	if err := os.Remove(filepath.Join(dst, "tools.json")); err != nil {
 		t.Fatal(err)
 	}
-	return abs
+	return dst
+}
+
+func copyPack(t *testing.T, src, dst string) {
+	t.Helper()
+	if err := filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type agentRecord struct {
@@ -447,24 +475,8 @@ func TestE2ESyncFromLocalGitOrigin(t *testing.T) {
 		}
 	}
 	git("init", "--quiet")
-	if err := filepath.WalkDir("examples/pack", func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		rel, err := filepath.Rel("examples/pack", path)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(origin, "pack", rel)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dst, data, 0o644)
-	}); err != nil {
+	copyPack(t, "examples/pack", filepath.Join(origin, "pack"))
+	if err := os.Remove(filepath.Join(origin, "pack", "tools.json")); err != nil {
 		t.Fatal(err)
 	}
 	git("add", "-A")
@@ -509,5 +521,222 @@ func TestE2ESyncFromLocalGitOrigin(t *testing.T) {
 	}
 	if _, err := os.Stat(record); err != nil {
 		t.Fatal("the agent should have started from the cached pack")
+	}
+}
+
+// toolsSetup is a machine with an old faketool on PATH, a fake npm whose
+// global prefix is prefix, and a pack that requires faketool 1.10.0.
+type toolsSetup struct {
+	pack, prefix, oldDir, binDir, npmLog string
+	home                                 string
+}
+
+func newToolsSetup(t *testing.T) toolsSetup {
+	t.Helper()
+	s := toolsSetup{
+		pack:   t.TempDir(),
+		prefix: t.TempDir(),
+		oldDir: t.TempDir(),
+		binDir: t.TempDir(),
+		home:   controlledHome(t, ""),
+	}
+	s.npmLog = filepath.Join(t.TempDir(), "npm.log")
+	tools := `{"faketool": {"min_version": "1.10.0", "install": {"manager": "npm", "package": "@acme/faketool"}}}`
+	if err := os.WriteFile(filepath.Join(s.pack, "tools.json"), []byte(tools), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.oldDir, "faketool"), []byte("#!/bin/sh\necho faketool 1.8.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	npm := `#!/bin/sh
+case "$1" in
+prefix) echo "` + s.prefix + `" ;;
+install)
+  echo "$*" >> "$NPM_LOG"
+  spec="$3"; ver="${spec##*@}"
+  mkdir -p "` + s.prefix + `/bin"
+  printf '#!/bin/sh\necho faketool %s\n' "$ver" > "` + s.prefix + `/bin/faketool"
+  chmod +x "` + s.prefix + `/bin/faketool" ;;
+*) exit 1 ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(s.binDir, "npm"), []byte(npm), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// env returns the environment with dirs first on PATH, in order.
+func (s toolsSetup) env(dirs ...string) []string {
+	sep := string(filepath.ListSeparator)
+	return upsertEnv(os.Environ(),
+		"HOME="+s.home,
+		"PATH="+strings.Join(dirs, sep)+sep+s.binDir+sep+os.Getenv("PATH"),
+		"NPM_LOG="+s.npmLog,
+	)
+}
+
+func (s toolsSetup) installs(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(s.npmLog)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestE2ELaunchWarnsAboutRequiredTools(t *testing.T) {
+	s := newToolsSetup(t)
+	fakeAgent(t, s.binDir, "claude")
+	record := filepath.Join(t.TempDir(), "record")
+	env := upsertEnv(s.env(), "RECORD="+record)
+
+	stdout, code := runWr(t, env, "--pack", s.pack, "claude")
+	if code != 0 {
+		t.Fatalf("exit = %d\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "note: faketool is not installed. Run `wr init`.\n") {
+		t.Fatalf("launch should warn about the missing tool:\n%s", stdout)
+	}
+	if _, err := os.Stat(record); err != nil {
+		t.Fatal("a missing tool must not block the launch")
+	}
+}
+
+func TestE2EInitDryRun(t *testing.T) {
+	s := newToolsSetup(t)
+	stdout, code := runWr(t, s.env(filepath.Join(s.prefix, "bin"), s.oldDir), "--pack", s.pack, "init", "--dry-run")
+	if code == 0 {
+		t.Fatalf("a dry run with a tool to install should exit non-zero\n%s", stdout)
+	}
+	for _, want := range []string{
+		"faketool: too old, 1.8.0 at " + filepath.Join(s.oldDir, "faketool") + " (minimum 1.10.0)\n",
+		"will run:\n  npm install -g @acme/faketool@1.10.0\n",
+		"dry run, nothing installed",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("output missing %q:\n%s", want, stdout)
+		}
+	}
+	if got := s.installs(t); got != "" {
+		t.Fatalf("a dry run must not install, npm ran: %s", got)
+	}
+}
+
+func TestE2EInitWithoutTerminalInstallsNothing(t *testing.T) {
+	s := newToolsSetup(t)
+	// runWr leaves stdin at /dev/null: not a terminal.
+	stdout, code := runWr(t, s.env(filepath.Join(s.prefix, "bin"), s.oldDir), "--pack", s.pack, "init")
+	if code == 0 || !strings.Contains(stdout, "rerun with --yes") {
+		t.Fatalf("exit = %d\n%s", code, stdout)
+	}
+	if got := s.installs(t); got != "" {
+		t.Fatalf("init must not install without a terminal or --yes, npm ran: %s", got)
+	}
+}
+
+func TestE2EInitYesInstalls(t *testing.T) {
+	s := newToolsSetup(t)
+	env := s.env(filepath.Join(s.prefix, "bin"), s.oldDir)
+	stdout, code := runWr(t, env, "--pack", s.pack, "init", "--yes")
+	if code != 0 {
+		t.Fatalf("exit = %d\n%s", code, stdout)
+	}
+	if got := s.installs(t); got != "install -g @acme/faketool@1.10.0\n" {
+		t.Fatalf("npm calls = %q", got)
+	}
+	want := "faketool: ok, 1.10.0 at " + filepath.Join(s.prefix, "bin", "faketool") + " (minimum 1.10.0)"
+	if !strings.Contains(stdout, "$ npm install -g @acme/faketool@1.10.0\n") || !strings.Contains(stdout, want) {
+		t.Fatalf("output:\n%s", stdout)
+	}
+
+	// Everything is ok now: init reports it and exits 0 without installing.
+	stdout, code = runWr(t, env, "--pack", s.pack, "init")
+	if code != 0 || strings.Contains(stdout, "will run") {
+		t.Fatalf("second init: exit = %d\n%s", code, stdout)
+	}
+	if got := s.installs(t); strings.Count(got, "install") != 1 {
+		t.Fatalf("second init must not install again, npm calls = %q", got)
+	}
+}
+
+func TestE2EInitReportsShadowedTool(t *testing.T) {
+	s := newToolsSetup(t)
+	// The old copy comes before the npm prefix on PATH, where a newer
+	// copy is already installed.
+	prefixBin := filepath.Join(s.prefix, "bin")
+	if err := os.MkdirAll(prefixBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prefixBin, "faketool"), []byte("#!/bin/sh\necho faketool 1.10.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stdout, code := runWr(t, s.env(s.oldDir, prefixBin), "--pack", s.pack, "init", "--yes")
+	if code == 0 {
+		t.Fatalf("a shadowed tool is not ok\n%s", stdout)
+	}
+	oldPath := filepath.Join(s.oldDir, "faketool")
+	for _, want := range []string{
+		"1.8.0 at " + oldPath + " comes first on PATH, before 1.10.0 at " + filepath.Join(prefixBin, "faketool"),
+		"faketool: cannot install: faketool at " + oldPath + " comes before " + prefixBin + " on PATH",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("output missing %q:\n%s", want, stdout)
+		}
+	}
+	if got := s.installs(t); got != "" {
+		t.Fatalf("an install that cannot take effect must not run, npm ran: %s", got)
+	}
+}
+
+func TestE2EDoctorListsRequiredTools(t *testing.T) {
+	s := newToolsSetup(t)
+	fakeAgent(t, s.binDir, "claude")
+	stdout, code := runWr(t, s.env(s.oldDir), "--pack", s.pack, "doctor")
+	if code != 0 {
+		t.Fatalf("exit = %d\n%s", code, stdout)
+	}
+	want := "tools:\n  faketool: too old, 1.8.0 at " + filepath.Join(s.oldDir, "faketool") + " (minimum 1.10.0), run wr init\n"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("doctor should list the tool:\n%s", stdout)
+	}
+	if strings.Count(stdout, "faketool:") != 1 {
+		t.Fatalf("the tool should be listed once, not once per agent launch:\n%s", stdout)
+	}
+
+	stdout, code = runWr(t, s.env(s.oldDir), "--pack", s.pack, "doctor", "--json")
+	if code != 0 {
+		t.Fatalf("exit = %d\n%s", code, stdout)
+	}
+	var report struct {
+		Tools struct {
+			Required []struct {
+				Name    string `json:"name"`
+				State   string `json:"state"`
+				Version string `json:"version"`
+			} `json:"required"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatal(err)
+	}
+	if r := report.Tools.Required; len(r) != 1 || r[0].Name != "faketool" || r[0].State != "too_old" || r[0].Version != "1.8.0" {
+		t.Fatalf("doctor --json tools = %+v", report.Tools)
+	}
+}
+
+func TestE2EInitFlagsOnlyApplyToInit(t *testing.T) {
+	s := newToolsSetup(t)
+	fakeAgent(t, s.binDir, "claude")
+	record := filepath.Join(t.TempDir(), "record")
+	stdout, code := runWr(t, upsertEnv(s.env(), "RECORD="+record), "--pack", s.pack, "--dry-run", "claude")
+	if code == 0 || !strings.Contains(stdout, "--dry-run and --yes only apply to init") {
+		t.Fatalf("exit = %d\n%s", code, stdout)
+	}
+	if _, err := os.Stat(record); !os.IsNotExist(err) {
+		t.Fatal("a launch with --dry-run must not start the agent")
 	}
 }

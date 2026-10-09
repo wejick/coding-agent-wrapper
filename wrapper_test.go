@@ -144,3 +144,83 @@ func TestPrepareFailsWhenBinaryMissing(t *testing.T) {
 		t.Fatalf("expected binary-not-found error, got %v", err)
 	}
 }
+
+// toolsPack writes a pack whose tools.json holds content.
+func toolsPack(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "tools.json"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestPrepareWarnsAboutRequiredTools(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	if err := os.WriteFile(filepath.Join(bin, "stale"), []byte("#!/bin/sh\necho 1.8.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dir := toolsPack(t, `{
+		"stale":  {"min_version": "1.10.0", "install": {"manager": "npm", "package": "stale"}},
+		"absent": {"min_version": "2.0.0"}
+	}`)
+
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:        "claude",
+		Pack:         pack.Local(dir),
+		SetupCommand: "acme init",
+	})
+	if err != nil {
+		t.Fatalf("a tool problem must not block the launch: %v", err)
+	}
+	want := []string{
+		"absent is not installed. Install absent 2.0.0 or newer.",
+		"stale 1.8.0 is older than the required 1.10.0. Run `acme init`.",
+	}
+	if !slices.Equal(launch.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", launch.Warnings, want)
+	}
+	for _, w := range want {
+		if !slices.Contains(launch.Notes, w) {
+			t.Fatalf("notes should carry the warning %q, got %v", w, launch.Notes)
+		}
+	}
+
+	// Without a setup command, every warning says what to install.
+	launch, err = wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent: "claude",
+		Pack:  pack.Local(dir),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := launch.Warnings[1]; w != "stale 1.8.0 is older than the required 1.10.0. Install stale 1.10.0 or newer." {
+		t.Fatalf("warning without SetupCommand = %q", w)
+	}
+
+	launch, err = wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:     "claude",
+		Pack:      pack.Local(dir),
+		SkipTools: true,
+	})
+	if err != nil || len(launch.Warnings) != 0 {
+		t.Fatalf("SkipTools: warnings = %v, err = %v", launch.Warnings, err)
+	}
+}
+
+func TestPrepareMalformedToolsFileIsAWarning(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent: "claude",
+		Pack:  pack.Local(toolsPack(t, `{"openspec": {"min_version": "v1.10"}}`)),
+	})
+	if err != nil {
+		t.Fatalf("a malformed tools.json must not block the launch: %v", err)
+	}
+	if len(launch.Warnings) != 1 || !strings.HasPrefix(launch.Warnings[0], "required tools were not checked: tools.json: openspec: min_version") {
+		t.Fatalf("warnings = %q", launch.Warnings)
+	}
+}

@@ -1,7 +1,9 @@
 # Embedding the library
 
 `wrapper.Run` is enough for a wrapper that launches agents with the pack's
-cached copy. This page covers the two calls an embedding binary needs when
+cached copy. It also checks the tools the pack requires and prints a note
+for each problem; [tools.md](tools.md) covers that check and the setup
+command that installs them. This page covers the two calls an embedding binary needs when
 it does more: refreshing the pack on its own schedule, and showing users
 what the pack provides.
 

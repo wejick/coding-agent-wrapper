@@ -23,7 +23,11 @@ import (
 	"github.com/wejick/coding-agent-wrapper/adapters/claude"
 	"github.com/wejick/coding-agent-wrapper/adapters/opencode"
 	"github.com/wejick/coding-agent-wrapper/pack"
+	"github.com/wejick/coding-agent-wrapper/tools"
 )
+
+// setupCommand is what launch warnings tell users to run.
+const setupCommand = "wr init"
 
 const usageText = `wr runs coding agents with organization defaults.
 
@@ -31,6 +35,7 @@ Usage:
   wr [flags] <agent> [agent args...]   run an agent with the org defaults pack
   wr [flags] doctor [--json]           verify setup and show computed launches
   wr [flags] sync                      refresh the defaults pack
+  wr [flags] init [--dry-run] [--yes]  install the tools the pack requires
   wr agents                            list registered agents
 
 Flags:
@@ -43,6 +48,8 @@ Flags:
   --refresh          refresh the defaults pack before acting; fails if the
                      remote cannot be reached
   --json             with doctor: print the report as JSON
+  --dry-run          with init: print the install plan and stop
+  --yes              with init: install without asking
 
 Examples:
   WRAPPER_PACK_URL=github.com/acme/agent-defaults wr claude
@@ -66,6 +73,8 @@ type globals struct {
 	strictMCP bool
 	refresh   bool
 	jsonOut   bool
+	dryRun    bool
+	yes       bool
 }
 
 func run(ctx context.Context, args []string) error {
@@ -79,15 +88,21 @@ func run(ctx context.Context, args []string) error {
 		return errors.New("missing command")
 	}
 	cmd, cmdArgs := rest[0], rest[1:]
+	if (g.dryRun || g.yes) && cmd != "init" {
+		return fmt.Errorf("--dry-run and --yes only apply to init")
+	}
 
 	// Diagnostics commands accept flags after the command too (`wr sync
 	// --refresh`); agent commands must not touch their arguments.
 	switch cmd {
-	case "help", "sync", "doctor":
+	case "help", "sync", "doctor", "init":
 		if err := fs.Parse(cmdArgs); err != nil {
 			return err
 		}
 		cmdArgs = fs.Args()
+		if (g.dryRun || g.yes) && cmd != "init" {
+			return fmt.Errorf("--dry-run and --yes only apply to init")
+		}
 	}
 
 	switch cmd {
@@ -101,6 +116,8 @@ func run(ctx context.Context, args []string) error {
 		return cmdSync(ctx)
 	case "doctor":
 		return cmdDoctor(ctx)
+	case "init":
+		return cmdInit(ctx)
 	default:
 		if _, err := wrapper.Lookup(cmd); err != nil {
 			return err
@@ -118,6 +135,8 @@ func newFlagSet() *flag.FlagSet {
 	fs.BoolVar(&globalsRef().strictMCP, "strict-mcp", false, "")
 	fs.BoolVar(&globalsRef().refresh, "refresh", false, "")
 	fs.BoolVar(&globalsRef().jsonOut, "json", false, "")
+	fs.BoolVar(&globalsRef().dryRun, "dry-run", false, "")
+	fs.BoolVar(&globalsRef().yes, "yes", false, "")
 	return fs
 }
 
@@ -145,12 +164,13 @@ func source() (pack.Source, error) {
 // note.
 func options(agent string, args []string, src pack.Source, fetched *pack.FetchResult) wrapper.Options {
 	return wrapper.Options{
-		Agent:      agent,
-		Args:       args,
-		Pack:       src,
-		Fetched:    fetched,
-		SkipPolicy: g.noPolicy,
-		StrictMCP:  g.strictMCP,
+		Agent:        agent,
+		Args:         args,
+		Pack:         src,
+		Fetched:      fetched,
+		SkipPolicy:   g.noPolicy,
+		StrictMCP:    g.strictMCP,
+		SetupCommand: setupCommand,
 	}
 }
 
@@ -187,7 +207,14 @@ type doctorReport struct {
 	Runtime string                   `json:"runtime"`
 	Agents  []agentStatus            `json:"agents"`
 	Pack    *packStatus              `json:"pack,omitempty"`
+	Tools   *toolsReport             `json:"tools,omitempty"`
 	Launch  map[string]*launchStatus `json:"launch,omitempty"`
+}
+
+// toolsReport is the state of the tools the pack requires.
+type toolsReport struct {
+	Required []tools.Status `json:"required"`
+	Error    string         `json:"error,omitempty"`
 }
 
 type agentStatus struct {
@@ -237,8 +264,9 @@ func diffEnv(base, env []string) []string {
 	return out
 }
 
-// cmdDoctor verifies the setup without running anything: agent binaries,
-// pack state, and the computed launch for every registered agent. It works
+// cmdDoctor verifies the setup without starting any agent: agent
+// binaries, pack state, required tools (each run once with --version), and
+// the computed launch for every registered agent. It works
 // before any pack is configured, which makes it the setup check.
 func cmdDoctor(ctx context.Context) error {
 	report := doctorReport{
@@ -304,10 +332,19 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 	ps.Version = p.ShortVersion()
 	ps.Notes = append(res.Notes, p.Notes...)
 
+	report.Tools = &toolsReport{Required: []tools.Status{}}
+	if reqs, err := tools.Load(p.Dir); err != nil {
+		report.Tools.Error = err.Error()
+	} else {
+		report.Tools.Required = tools.Check(ctx, reqs, tools.CheckOptions{})
+	}
+
 	report.Launch = make(map[string]*launchStatus, len(report.Agents))
 	for _, name := range wrapper.Agents() {
 		ls := &launchStatus{}
-		launch, err := wrapper.Prepare(ctx, options(name, nil, src, res))
+		opts := options(name, nil, src, res)
+		opts.SkipTools = true // checked once above
+		launch, err := wrapper.Prepare(ctx, opts)
 		if err != nil {
 			ls.Error = err.Error()
 		} else {
@@ -357,6 +394,22 @@ func printDoctor(r doctorReport) {
 			for _, note := range r.Pack.Notes {
 				fmt.Println("  note:    " + note)
 			}
+		}
+	}
+
+	if r.Tools != nil {
+		fmt.Println("\ntools:")
+		if r.Tools.Error != "" {
+			fmt.Printf("  error: %s\n", r.Tools.Error)
+		} else if len(r.Tools.Required) == 0 {
+			fmt.Println("  none required")
+		}
+		for _, s := range r.Tools.Required {
+			line := s.Describe()
+			if s.State != tools.OK && s.Install != nil {
+				line += ", run " + setupCommand
+			}
+			fmt.Println("  " + line)
 		}
 	}
 
