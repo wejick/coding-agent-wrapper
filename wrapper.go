@@ -58,6 +58,11 @@ type Options struct {
 	// Refresh forces a pack round trip before launching instead of using
 	// the cached copy.
 	Refresh bool
+	// Fetched is a pack the caller already fetched from Pack, for example
+	// after checking pack.Stale and refreshing. Prepare then uses it as
+	// is and does not fetch again, so Launch.Source and Launch.Notes
+	// describe this fetch. Refresh is ignored when Fetched is set.
+	Fetched *pack.FetchResult
 	// SkipPolicy skips the pack's policy layer and stops forcing pack env
 	// defaults, so the launch runs with soft defaults only. The zero
 	// value enforces org policy.
@@ -87,8 +92,9 @@ type Launch struct {
 	PackVersion map[string]any `json:"pack_version,omitempty"`
 }
 
-// Prepare resolves the agent, fetches the defaults pack and computes the
-// launch without running anything. Use it for diagnostics, tests and
+// Prepare resolves the agent, fetches the defaults pack (unless
+// opts.Fetched carries one) and computes the launch without running
+// anything. Use it for diagnostics, tests and
 // tooling that needs to know exactly what would execute; Run is Prepare
 // followed by Launch.Exec.
 func Prepare(ctx context.Context, opts Options) (*Launch, error) {
@@ -102,9 +108,11 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	if opts.Pack == nil {
 		return nil, errors.New("wrapper: no defaults pack configured")
 	}
-	res, err := opts.Pack.Fetch(ctx, pack.FetchOptions{Refresh: opts.Refresh})
-	if err != nil {
-		return nil, err
+	res := opts.Fetched
+	if res == nil {
+		if res, err = opts.Pack.Fetch(ctx, pack.FetchOptions{Refresh: opts.Refresh}); err != nil {
+			return nil, err
+		}
 	}
 	p, err := pack.Load(res.Dir, opts.Pack.Describe())
 	if err != nil {

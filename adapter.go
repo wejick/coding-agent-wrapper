@@ -40,6 +40,14 @@ type Adapter interface {
 	Build(ctx context.Context, p *pack.Pack, o BuildOptions) (*Launch, error)
 }
 
+// SkillLister is implemented by adapters that can list the skills a pack
+// provides for their agent. Skills reads the same pack location the
+// launch loads, so the list matches what the agent will see. Check for it
+// with a type assertion on the adapter returned by Lookup.
+type SkillLister interface {
+	Skills(p *pack.Pack) ([]pack.Skill, error)
+}
+
 var (
 	registryMu sync.RWMutex
 	registry   = map[string]Adapter{}

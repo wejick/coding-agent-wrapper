@@ -2,8 +2,10 @@ package wrapper_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -55,6 +57,40 @@ func TestPrepareEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(launch.Source, "local:") {
 		t.Fatalf("source = %q", launch.Source)
+	}
+	if launch.PackVersion["name"] != "acme-defaults" {
+		t.Fatalf("pack version = %v", launch.PackVersion)
+	}
+}
+
+// fetchFails is a pack source whose Fetch always errors, to prove Prepare
+// does not fetch when given an already-fetched pack.
+type fetchFails struct{}
+
+func (fetchFails) Fetch(context.Context, pack.FetchOptions) (*pack.FetchResult, error) {
+	return nil, errors.New("fetch called")
+}
+
+func (fetchFails) Describe() string { return "git:example.com/acme/defaults" }
+
+func TestPrepareUsesFetchedPack(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+
+	note := "refresh failed (offline); using cached pack"
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:   "claude",
+		Pack:    fetchFails{},
+		Fetched: &pack.FetchResult{Dir: "examples/pack", From: "cache", Notes: []string{note}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launch.Source != "git:example.com/acme/defaults (cache)" {
+		t.Fatalf("source = %q", launch.Source)
+	}
+	if !slices.Contains(launch.Notes, note) {
+		t.Fatalf("notes should carry the fetch's notes, got %v", launch.Notes)
 	}
 	if launch.PackVersion["name"] != "acme-defaults" {
 		t.Fatalf("pack version = %v", launch.PackVersion)

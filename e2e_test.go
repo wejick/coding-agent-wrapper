@@ -372,8 +372,11 @@ func TestE2EDoctorJSON(t *testing.T) {
 			Binary string `json:"binary"`
 		} `json:"agents"`
 		Launch map[string]struct {
-			Args []string `json:"args"`
-			Env  []string `json:"env_injected"`
+			Args   []string `json:"args"`
+			Env    []string `json:"env_injected"`
+			Skills []struct {
+				Name string `json:"name"`
+			} `json:"skills"`
 		} `json:"launch"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
@@ -389,6 +392,9 @@ func TestE2EDoctorJSON(t *testing.T) {
 	launch, ok := report.Launch["claude"]
 	if !ok || len(launch.Args) == 0 || launch.Args[0] != "--settings" {
 		t.Fatalf("launch.claude = %+v", launch)
+	}
+	if len(launch.Skills) != 1 || launch.Skills[0].Name != "commit-style" {
+		t.Fatalf("launch.claude should list the org skills, got %+v", launch.Skills)
 	}
 	oconfig, ok := report.Launch["opencode"]
 	if !ok {

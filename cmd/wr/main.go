@@ -140,14 +140,16 @@ func source() (pack.Source, error) {
 	return pack.Git(g.packRef, g.rev), nil
 }
 
-// options never asks the launch to refresh: a launch runs on the cached
-// pack, and --refresh is handled up front by refresh so that a failure
-// stops the command instead of becoming a note.
-func options(agent string, args []string, src pack.Source) wrapper.Options {
+// options never asks the launch to refresh: --refresh is handled up front
+// by refresh so that a failure stops the command instead of becoming a
+// note. fetched is the pack that fetch produced; nil lets the launch use
+// the cached pack.
+func options(agent string, args []string, src pack.Source, fetched *pack.FetchResult) wrapper.Options {
 	return wrapper.Options{
 		Agent:      agent,
 		Args:       args,
 		Pack:       src,
+		Fetched:    fetched,
 		SkipPolicy: g.noPolicy,
 		StrictMCP:  g.strictMCP,
 	}
@@ -172,12 +174,13 @@ func cmdRun(ctx context.Context, agent string, args []string) error {
 	if err != nil {
 		return err
 	}
+	var fetched *pack.FetchResult
 	if g.refresh {
-		if _, err := refresh(ctx, src); err != nil {
+		if fetched, err = refresh(ctx, src); err != nil {
 			return err
 		}
 	}
-	return wrapper.Run(ctx, options(agent, args, src))
+	return wrapper.Run(ctx, options(agent, args, src, fetched))
 }
 
 type doctorReport struct {
@@ -207,12 +210,13 @@ type packStatus struct {
 }
 
 type launchStatus struct {
-	Binary string   `json:"binary,omitempty"`
-	Args   []string `json:"args,omitempty"`
-	Env    []string `json:"env_injected,omitempty"`
-	Files  []string `json:"files,omitempty"`
-	Notes  []string `json:"notes,omitempty"`
-	Error  string   `json:"error,omitempty"`
+	Binary string       `json:"binary,omitempty"`
+	Args   []string     `json:"args,omitempty"`
+	Env    []string     `json:"env_injected,omitempty"`
+	Files  []string     `json:"files,omitempty"`
+	Skills []pack.Skill `json:"skills,omitempty"`
+	Notes  []string     `json:"notes,omitempty"`
+	Error  string       `json:"error,omitempty"`
 }
 
 // diffEnv returns entries of env that are absent from base or hold a
@@ -304,7 +308,7 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 	report.Launch = make(map[string]*launchStatus, len(report.Agents))
 	for _, name := range wrapper.Agents() {
 		ls := &launchStatus{}
-		launch, err := wrapper.Prepare(ctx, options(name, nil, src))
+		launch, err := wrapper.Prepare(ctx, options(name, nil, src, res))
 		if err != nil {
 			ls.Error = err.Error()
 		} else {
@@ -313,6 +317,13 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 			ls.Env = diffEnv(os.Environ(), launch.Env)
 			ls.Files = launch.Files
 			ls.Notes = launch.Notes
+		}
+		if a, err := wrapper.Lookup(name); err == nil {
+			if sl, ok := a.(wrapper.SkillLister); ok {
+				if ls.Skills, err = sl.Skills(p); err != nil {
+					ls.Notes = append(ls.Notes, fmt.Sprintf("org skills could not be listed: %v", err))
+				}
+			}
 		}
 		report.Launch[name] = ls
 	}
@@ -371,6 +382,9 @@ func printDoctor(r doctorReport) {
 			}
 			for _, f := range ls.Files {
 				fmt.Printf("    file:  %s\n", f)
+			}
+			for _, sk := range ls.Skills {
+				fmt.Printf("    skill: %s: %s\n", sk.Name, sk.Description)
 			}
 			for _, note := range ls.Notes {
 				fmt.Printf("    - %s\n", note)

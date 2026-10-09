@@ -317,3 +317,24 @@ func write(t *testing.T, content string) string {
 	}
 	return path
 }
+
+func TestSkillsListsConfigDirSkills(t *testing.T) {
+	skills, err := opencode.New().Skills(testPack(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 1 || skills[0].Name != "commit-style" || skills[0].Description == "" {
+		t.Fatalf("skills = %+v", skills)
+	}
+	want := filepath.Join("../../examples/pack", "opencode", "config", "skills", "commit-style", "SKILL.md")
+	if skills[0].Path != want {
+		t.Fatalf("path = %q, want %q", skills[0].Path, want)
+	}
+}
+
+func TestSkillsEmptyWithoutConfigDir(t *testing.T) {
+	skills, err := opencode.New().Skills(emptyPack(t))
+	if err != nil || len(skills) != 0 {
+		t.Fatalf("skills = %+v, err = %v", skills, err)
+	}
+}

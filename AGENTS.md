@@ -23,6 +23,7 @@ pack/
   git.go                git-backed distribution: clone, refresh, ref pinning,
                         offline fallback, #subdir roots
   merge.go              semantic JSON deep-merge (union arrays) + env merging
+  skills.go             skill listing: SKILL.md frontmatter (name, description)
 adapters/claude/
   claude.go             Claude Code adapter: builds the launch from the pack
   claude_test.go        asserts on computed launches and merged settings
@@ -40,6 +41,8 @@ examples/pack/          complete example org pack (also used by tests)
 docs/
   config-layers.md      the configuration layering model (canonical reference)
   adapters.md           how to add an agent adapter
+  embedding.md          caller-side refresh policy (Options.Fetched) and
+                        listing pack skills (SkillLister)
 ```
 
 ## Commands

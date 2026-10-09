@@ -25,6 +25,20 @@ agent: resolved binary, final argv, full environment, generated files, and a
 human-readable `Notes` trail. `Run` = `Prepare` + `Exec`; adapters only own
 `Build`.
 
+Adapters that load skills from the pack should also implement the optional
+`wrapper.SkillLister` interface, so callers can list those skills without
+knowing the agent's layout:
+
+```go
+type SkillLister interface {
+	Skills(p *pack.Pack) ([]pack.Skill, error)
+}
+```
+
+Read the same directory `Build` passes to the agent. When the agent uses
+the shared `skills/<name>/SKILL.md` layout, `pack.ReadSkills(dir)` does
+the reading. See [embedding.md](embedding.md) for how callers use it.
+
 ## Rules every adapter should follow
 
 1. Apply everything at launch time. Translate pack files into flags, env

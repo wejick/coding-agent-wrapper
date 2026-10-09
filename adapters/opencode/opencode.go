@@ -85,6 +85,8 @@ type Adapter struct {
 	CacheDir string
 }
 
+var _ wrapper.SkillLister = (*Adapter)(nil)
+
 // New returns an OpenCode adapter with defaults.
 func New() *Adapter { return &Adapter{} }
 
@@ -246,6 +248,16 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		launch.Notes = append(launch.Notes, fmt.Sprintf("pack contains no %s defaults; launching vanilla %s", DirName, a.binaryName()))
 	}
 	return launch, nil
+}
+
+// Skills implements wrapper.SkillLister: the skills in the org config
+// dir's skills/ directory (opencode/config/skills/<name>/SKILL.md).
+func (a *Adapter) Skills(p *pack.Pack) ([]pack.Skill, error) {
+	dir, ok := p.Subdir(DirName, DirConfig)
+	if !ok {
+		return nil, nil
+	}
+	return pack.ReadSkills(filepath.Join(dir, "skills"))
 }
 
 // globalConfigFiles lists the user's global config files in OpenCode's own
