@@ -26,6 +26,7 @@ func TestReadSkills(t *testing.T) {
 	write("nometa", "# No frontmatter\n")
 	write("bom", "\ufeff---\nname: bom # saved by a Windows editor\ndescription: Has a BOM.\n---\n")
 	write("team/nested", "---\nname: nested\ndescription: Grouped under team/.\n---\n")
+	write("plain/templates", "---\nname: template\n---\n")
 	write(".hidden", "---\nname: hidden\n---\n")
 	shared := filepath.Join(t.TempDir(), "shared")
 	if err := os.MkdirAll(shared, 0o755); err != nil {

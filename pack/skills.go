@@ -29,8 +29,9 @@ func (d SkillDirs) List() ([]Skill, error) {
 	return skills, nil
 }
 
-// readSkills finds every SKILL.md under dir, following symlinks and
-// skipping hidden entries.
+// readSkills finds the skill directories under dir, following symlinks
+// and skipping hidden entries. It does not look inside a skill directory
+// for more skills.
 func readSkills(dir string) ([]Skill, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
@@ -47,34 +48,23 @@ func readSkills(dir string) ([]Skill, error) {
 			return nil
 		}
 		seen[real] = true
+		path := filepath.Join(dir, "SKILL.md")
+		if data, err := os.ReadFile(path); err == nil {
+			fm := frontmatter(string(data))
+			skills = append(skills, Skill{Name: fm["name"], Description: fm["description"], Path: path})
+			return nil
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			return err
 		}
 		for _, e := range entries {
-			if strings.HasPrefix(e.Name(), ".") {
-				continue
-			}
-			path := filepath.Join(dir, e.Name())
-			info, err := os.Stat(path)
-			if err != nil {
-				continue
-			}
-			if info.IsDir() {
-				if err := walk(path); err != nil {
+			sub := filepath.Join(dir, e.Name())
+			if info, err := os.Stat(sub); err == nil && info.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+				if err := walk(sub); err != nil {
 					return err
 				}
-				continue
 			}
-			if e.Name() != "SKILL.md" {
-				continue
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				return err
-			}
-			fm := frontmatter(string(data))
-			skills = append(skills, Skill{Name: fm["name"], Description: fm["description"], Path: path})
 		}
 		return nil
 	}
