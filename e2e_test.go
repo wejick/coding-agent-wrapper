@@ -592,9 +592,9 @@ func TestE2ELaunchWarnsAboutRequiredTools(t *testing.T) {
 	s := newToolsSetup(t)
 	fakeAgent(t, s.binDir, "claude")
 	record := filepath.Join(t.TempDir(), "record")
-	env := upsertEnv(s.env(), "RECORD="+record)
+	prefixBin := filepath.Join(s.prefix, "bin")
 
-	stdout, code := runWr(t, env, "--pack", s.pack, "claude")
+	stdout, code := runWr(t, upsertEnv(s.env(prefixBin), "RECORD="+record), "--pack", s.pack, "claude")
 	if code != 0 {
 		t.Fatalf("exit = %d\n%s", code, stdout)
 	}
@@ -603,6 +603,14 @@ func TestE2ELaunchWarnsAboutRequiredTools(t *testing.T) {
 	}
 	if _, err := os.Stat(record); err != nil {
 		t.Fatal("a missing tool must not block the launch")
+	}
+
+	// With npm's bin directory off PATH, wr init would refuse: the note
+	// gives the reason instead of sending the user to wr init.
+	stdout, code = runWr(t, upsertEnv(s.env(), "RECORD="+record), "--pack", s.pack, "claude")
+	want := "note: faketool is not installed. `wr init` cannot install it: npm installs executables into " + prefixBin + ", which is not on PATH"
+	if code != 0 || !strings.Contains(stdout, want) {
+		t.Fatalf("exit = %d, output missing %q:\n%s", code, want, stdout)
 	}
 }
 
@@ -695,7 +703,8 @@ func TestE2EInitReportsShadowedTool(t *testing.T) {
 func TestE2EDoctorListsRequiredTools(t *testing.T) {
 	s := newToolsSetup(t)
 	fakeAgent(t, s.binDir, "claude")
-	stdout, code := runWr(t, s.env(s.oldDir), "--pack", s.pack, "doctor")
+	prefixBin := filepath.Join(s.prefix, "bin")
+	stdout, code := runWr(t, s.env(prefixBin, s.oldDir), "--pack", s.pack, "doctor")
 	if code != 0 {
 		t.Fatalf("exit = %d\n%s", code, stdout)
 	}
@@ -705,6 +714,14 @@ func TestE2EDoctorListsRequiredTools(t *testing.T) {
 	}
 	if strings.Count(stdout, "faketool:") != 1 {
 		t.Fatalf("the tool should be listed once, not once per agent launch:\n%s", stdout)
+	}
+
+	// The old copy now comes before npm's bin directory: init would
+	// refuse, and doctor says why instead of pointing to it.
+	stdout, code = runWr(t, s.env(s.oldDir, prefixBin), "--pack", s.pack, "doctor")
+	want = "(minimum 1.10.0), cannot install: faketool at " + filepath.Join(s.oldDir, "faketool") + " comes before " + prefixBin + " on PATH"
+	if code != 0 || !strings.Contains(stdout, want) || strings.Contains(stdout, "run wr init") {
+		t.Fatalf("exit = %d, output missing %q:\n%s", code, want, stdout)
 	}
 
 	stdout, code = runWr(t, s.env(s.oldDir), "--pack", s.pack, "doctor", "--json")
@@ -718,6 +735,7 @@ func TestE2EDoctorListsRequiredTools(t *testing.T) {
 				State   string `json:"state"`
 				Version string `json:"version"`
 			} `json:"required"`
+			CannotInstall map[string]string `json:"cannot_install"`
 		} `json:"tools"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
@@ -725,6 +743,9 @@ func TestE2EDoctorListsRequiredTools(t *testing.T) {
 	}
 	if r := report.Tools.Required; len(r) != 1 || r[0].Name != "faketool" || r[0].State != "too_old" || r[0].Version != "1.8.0" {
 		t.Fatalf("doctor --json tools = %+v", report.Tools)
+	}
+	if !strings.Contains(report.Tools.CannotInstall["faketool"], "which is not on PATH") {
+		t.Fatalf("doctor --json should say why init cannot install, got %+v", report.Tools.CannotInstall)
 	}
 }
 

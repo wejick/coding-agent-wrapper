@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/wejick/coding-agent-wrapper/pack"
 	"github.com/wejick/coding-agent-wrapper/tools"
@@ -74,8 +75,9 @@ type Options struct {
 	Env []string
 	// SetupCommand is the command users run to install the pack's
 	// required tools, such as "wr init". When set, warnings about a tool
-	// the pack can install end with "Run `<SetupCommand>`."; otherwise
-	// they name the version to install.
+	// the pack can install end with "Run `<SetupCommand>`.", or with why
+	// the setup command would refuse to install it; otherwise they name
+	// the version to install.
 	SetupCommand string
 	// SkipTools skips checking the tools the pack requires (tools.json).
 	// Callers that check them separately, such as a doctor command, set
@@ -166,20 +168,61 @@ func toolWarnings(ctx context.Context, dir string, opts Options) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("required tools were not checked: %v", err)}
 	}
+	statuses := tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env})
+	var refused map[string]error
+	if opts.SetupCommand != "" {
+		refused = refusedInstalls(ctx, statuses, opts.Env)
+	}
 	var warnings []string
-	for _, s := range tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env}) {
+	for _, s := range statuses {
 		problem := s.Problem()
 		if problem == "" {
 			continue
 		}
-		if s.Install != nil && opts.SetupCommand != "" {
-			problem += " Run `" + opts.SetupCommand + "`."
-		} else {
+		switch {
+		case s.Install == nil || opts.SetupCommand == "":
 			problem += fmt.Sprintf(" Install %s %s or newer.", s.Name, s.MinVersion)
+		case refused[s.Name] != nil:
+			problem += fmt.Sprintf(" `%s` cannot install it: %v.", opts.SetupCommand, refused[s.Name])
+		default:
+			problem += " Run `" + opts.SetupCommand + "`."
 		}
 		warnings = append(warnings, problem)
 	}
 	return warnings
+}
+
+// planTimeout bounds the install planning a launch does for broken tools.
+const planTimeout = 3 * time.Second
+
+// refusedInstalls plans the installs for the tools that are not ok and
+// returns, per tool, why the setup command would refuse to install it, so
+// a warning never sends the user to a command that cannot help. It runs
+// nothing when every tool is ok. When planning does not finish in time it
+// returns nil and the warnings point to the setup command as usual.
+func refusedInstalls(ctx context.Context, statuses []tools.Status, env []string) map[string]error {
+	var broken []tools.Status
+	for _, s := range statuses {
+		if s.State != tools.OK && s.Install != nil {
+			broken = append(broken, s)
+		}
+	}
+	if len(broken) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, planTimeout)
+	defer cancel()
+	steps := tools.Plan(ctx, broken, tools.PlanOptions{Env: env})
+	if ctx.Err() != nil {
+		return nil
+	}
+	refused := map[string]error{}
+	for _, st := range steps {
+		if st.Err != nil {
+			refused[st.Tool] = st.Err
+		}
+	}
+	return refused
 }
 
 // Run prepares the launch, prints its warnings as "note: ..." lines and

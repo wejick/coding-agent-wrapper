@@ -162,6 +162,14 @@ func TestPrepareWarnsAboutRequiredTools(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(bin, "stale"), []byte("#!/bin/sh\necho 1.8.0\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// An npm whose global bin directory comes first on PATH, so a planned
+	// install would replace the stale copy.
+	prefix := t.TempDir()
+	npm := "#!/bin/sh\n[ \"$1 $2\" = \"prefix -g\" ] && echo " + prefix + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "npm"), []byte(npm), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", filepath.Join(prefix, "bin")+string(filepath.ListSeparator)+bin)
 	dir := toolsPack(t, `{
 		"stale":  {"min_version": "1.10.0", "install": {"manager": "npm", "package": "stale"}},
 		"absent": {"min_version": "2.0.0"}
@@ -186,6 +194,23 @@ func TestPrepareWarnsAboutRequiredTools(t *testing.T) {
 		if !slices.Contains(launch.Notes, w) {
 			t.Fatalf("notes should carry the warning %q, got %v", w, launch.Notes)
 		}
+	}
+
+	// When the install directory comes after the stale copy on PATH, the
+	// setup command would refuse, so the warning says why instead.
+	t.Setenv("PATH", bin+string(filepath.ListSeparator)+filepath.Join(prefix, "bin"))
+	launch, err = wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:        "claude",
+		Pack:         pack.Local(dir),
+		SetupCommand: "acme init",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refused := "stale 1.8.0 is older than the required 1.10.0. `acme init` cannot install it: stale at " +
+		filepath.Join(bin, "stale") + " comes before " + filepath.Join(prefix, "bin") + " on PATH"
+	if w := launch.Warnings[1]; !strings.HasPrefix(w, refused) {
+		t.Fatalf("refused install warning = %q, want prefix %q", w, refused)
 	}
 
 	// Without a setup command, every warning says what to install.

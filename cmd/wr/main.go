@@ -214,7 +214,10 @@ type doctorReport struct {
 // toolsReport is the state of the tools the pack requires.
 type toolsReport struct {
 	Required []tools.Status `json:"required"`
-	Error    string         `json:"error,omitempty"`
+	// CannotInstall maps a tool that is not ok to why init would refuse
+	// to install it.
+	CannotInstall map[string]string `json:"cannot_install,omitempty"`
+	Error         string            `json:"error,omitempty"`
 }
 
 type agentStatus struct {
@@ -337,6 +340,15 @@ func checkPack(ctx context.Context, report *doctorReport) *packStatus {
 		report.Tools.Error = err.Error()
 	} else {
 		report.Tools.Required = tools.Check(ctx, reqs, tools.CheckOptions{})
+		for _, st := range tools.Plan(ctx, report.Tools.Required, tools.PlanOptions{}) {
+			if st.Err == nil {
+				continue
+			}
+			if report.Tools.CannotInstall == nil {
+				report.Tools.CannotInstall = map[string]string{}
+			}
+			report.Tools.CannotInstall[st.Tool] = st.Err.Error()
+		}
 	}
 
 	report.Launch = make(map[string]*launchStatus, len(report.Agents))
@@ -406,7 +418,9 @@ func printDoctor(r doctorReport) {
 		}
 		for _, s := range r.Tools.Required {
 			line := s.Describe()
-			if s.State != tools.OK && s.Install != nil {
+			if reason, ok := r.Tools.CannotInstall[s.Name]; ok {
+				line += ", cannot install: " + reason
+			} else if s.State != tools.OK {
 				line += ", run " + setupCommand
 			}
 			fmt.Println("  " + line)

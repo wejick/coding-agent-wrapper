@@ -84,14 +84,30 @@ node is not installed. Install node 20.0.0 or newer.
 
 The `Run ...` suffix comes from `Options.SetupCommand`, so each wrapper
 names its own command. A tool without `install`, or any tool when
-`SetupCommand` is empty, gets the second form. A
+`SetupCommand` is empty, gets the second form.
+
+When a tool is not `ok` and `SetupCommand` is set, `Prepare` also plans
+its install (see step 3 under `wr init`). If the setup command would
+refuse, the warning gives the reason instead of sending the user there:
+
+```
+openspec 1.8.0 is older than the required 1.10.0. `wr init` cannot install it: openspec at /usr/bin/openspec comes before /usr/local/bin on PATH, so a npm install there would not be used; remove /usr/bin/openspec or move /usr/local/bin earlier on PATH.
+```
+
+Planning asks the package manager where it installs (`npm prefix -g`,
+`go env`), so it only happens while some tool is broken, and it is
+bounded at 3 seconds; when it runs out of time the warning falls back to
+`Run ...`. A launch where every tool is `ok` runs nothing beyond the
+`--version` checks. A
 `tools.json` that cannot be parsed becomes one warning
 (`required tools were not checked: tools.json: ...`). Warnings never block
 the launch. `wrapper.Run` prints them to `Options.Stderr` (standard error
 by default) as `note: ...` lines before starting the agent.
 
 `Options.SkipTools` turns the check off. `wr doctor` sets it and checks
-the tools once itself, instead of once per agent launch it prepares.
+the tools once itself, instead of once per agent launch it prepares. It
+prints `run wr init` after a broken tool, or `cannot install: <reason>`
+when init would refuse (`cannot_install` in `--json`).
 
 ## Installing: `wr init`
 

@@ -96,7 +96,7 @@ func (p planner) step(ctx context.Context, s Status) Step {
 		return step
 	}
 	if s.State == TooOld && s.Version == "" {
-		step.Err = fmt.Errorf("%s at %s did not report a version (%s), so installing %s could replace a newer copy; check it yourself, or remove it and plan again",
+		step.Err = fmt.Errorf("%s at %s did not report a version (%s), so installing %s could replace a newer copy; check it yourself, or remove it and install again",
 			r.Name, s.Path, s.Detail, r.MinVersion)
 		return step
 	}
