@@ -84,51 +84,50 @@ func readSkills(dir string) ([]Skill, error) {
 	return skills, nil
 }
 
-// frontmatter parses the top-level keys of a leading "---" YAML block.
+// frontmatter returns the top-level keys of a leading "---" YAML block.
 func frontmatter(doc string) map[string]string {
-	doc = strings.TrimPrefix(doc, "\ufeff")
-	lines := strings.Split(strings.ReplaceAll(doc, "\r\n", "\n"), "\n")
-	if strings.TrimSpace(lines[0]) != "---" {
+	doc = strings.ReplaceAll(strings.TrimPrefix(doc, "\ufeff"), "\r\n", "\n")
+	rest, ok := strings.CutPrefix(doc, "---\n")
+	if !ok {
 		return nil
 	}
-	out := map[string]string{}
-	for i := 1; i < len(lines); i++ {
-		line := lines[i]
-		if strings.TrimSpace(line) == "---" {
-			return out
-		}
-		if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
-			continue
-		}
-		key, value, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		var more []string
-		for i+1 < len(lines) && (strings.TrimSpace(lines[i+1]) == "" || lines[i+1][0] == ' ' || lines[i+1][0] == '\t') {
-			i++
-			more = append(more, strings.TrimSpace(lines[i]))
-		}
-		switch {
-		case strings.HasPrefix(value, "|"):
-			value = strings.TrimSpace(strings.Join(more, "\n"))
-		case strings.HasPrefix(value, ">"):
-			value = strings.Join(strings.Fields(strings.Join(more, " ")), " ")
-		default:
-			if !strings.HasPrefix(value, "\"") && !strings.HasPrefix(value, "'") {
-				if i := strings.Index(value, " #"); i >= 0 {
-					value = strings.TrimSpace(value[:i])
-				}
-			}
-			if len(more) > 0 {
-				value = strings.Join(strings.Fields(value+" "+strings.Join(more, " ")), " ")
-			}
-			value = unquote(value)
-		}
-		out[strings.TrimSpace(key)] = value
+	block, _, ok := strings.Cut(rest, "\n---")
+	if !ok {
+		return nil
 	}
-	return nil
+	return parseYAML(block)
+}
+
+// parseYAML reads "key: value" lines. Indented lines continue the previous
+// value, joined with spaces, which also covers "|" and ">" blocks.
+func parseYAML(block string) map[string]string {
+	out := map[string]string{}
+	key := ""
+	for _, line := range strings.Split(block, "\n") {
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "" || strings.HasPrefix(line, "#"):
+		case line[0] == ' ' || line[0] == '\t':
+			if key != "" {
+				out[key] = strings.TrimSpace(out[key] + " " + trimmed)
+			}
+		default:
+			k, v, ok := strings.Cut(line, ":")
+			if !ok {
+				key = ""
+				continue
+			}
+			key = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if strings.HasPrefix(v, "|") || strings.HasPrefix(v, ">") {
+				v = ""
+			} else if i := strings.Index(v, " #"); i >= 0 && !strings.ContainsAny(v[:1], `"'`) {
+				v = strings.TrimSpace(v[:i])
+			}
+			out[key] = unquote(v)
+		}
+	}
+	return out
 }
 
 func unquote(s string) string {
