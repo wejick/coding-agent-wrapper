@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -195,6 +196,123 @@ func TestBuildProjectLayering(t *testing.T) {
 	}
 	if !sawLayers {
 		t.Fatalf("expected a settings-layers note, got %v", launch.Notes)
+	}
+}
+
+func TestBuildDirOverridesProjectDir(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	project := func(model string) string {
+		dir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte(`{"model":"`+model+`"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	a.ProjectDir = project("fallback-model")
+
+	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{Dir: project("dir-model")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model := readMerged(t, launch)["model"]; model != "dir-model" {
+		t.Fatalf("project settings should come from BuildOptions.Dir, model = %v", model)
+	}
+}
+
+func TestBuildHeadless(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	a.ProjectDir = t.TempDir()
+
+	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+		Args: []string{"--output-format", "json"},
+		Headless: &wrapper.Headless{
+			Prompt:     "/audit:readiness /src/page",
+			Model:      "sonnet",
+			Effort:     "medium",
+			Unattended: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Pack flags first, then the headless flags, then the user's args.
+	if launch.Args[0] != "--settings" {
+		t.Fatalf("pack flags should come first, args = %q", launch.Args)
+	}
+	want := []string{
+		"-p", "/audit:readiness /src/page",
+		"--permission-mode", "bypassPermissions",
+		"--model", "sonnet",
+		"--effort", "medium",
+		"--output-format", "json",
+	}
+	if got := launch.Args[len(launch.Args)-len(want):]; !slices.Equal(got, want) {
+		t.Fatalf("args end = %q, want %q", got, want)
+	}
+	var headless []string
+	for _, n := range launch.Notes {
+		if strings.HasPrefix(n, "headless: ") {
+			headless = append(headless, n)
+		}
+	}
+	if len(headless) != 4 {
+		t.Fatalf("expected one headless note per field, got %q", headless)
+	}
+
+	// Only the prompt is required; unset fields add no flags.
+	launch, err = a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+		Headless: &wrapper.Headless{Prompt: "task"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := launch.Args[len(launch.Args)-2:]; !slices.Equal(got, []string{"-p", "task"}) {
+		t.Fatalf("args = %q", launch.Args)
+	}
+
+	for _, prompt := range []string{"", "--help me"} {
+		if _, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+			Headless: &wrapper.Headless{Prompt: prompt},
+		}); err == nil {
+			t.Errorf("prompt %q: expected an error", prompt)
+		}
+	}
+}
+
+func TestBuildHeadlessNotesDisabledBypass(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	proj := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"),
+		[]byte(`{"permissions":{"disableBypassPermissionsMode":"disable"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+
+	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+		Dir:      proj,
+		Headless: &wrapper.Headless{Prompt: "task", Unattended: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(launch.Notes, func(n string) bool {
+		return strings.Contains(n, "permission prompts still apply")
+	}) {
+		t.Fatalf("expected a note that bypass mode is disabled, got %q", launch.Notes)
 	}
 }
 

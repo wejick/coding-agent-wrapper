@@ -249,3 +249,65 @@ func TestPrepareMalformedToolsFileIsAWarning(t *testing.T) {
 		t.Fatalf("warnings = %q", launch.Warnings)
 	}
 }
+
+func TestPrepareHeadlessInDir(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+	t.Setenv("HOME", t.TempDir())
+	packDir, err := filepath.Abs("examples/pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	proj := filepath.Join(root, "repo")
+	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"), []byte(`{"model":"haiku"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:    "claude",
+		Args:     []string{"--verbose"},
+		Pack:     pack.Local(packDir),
+		Dir:      "repo", // relative to the working directory
+		Headless: &wrapper.Headless{Prompt: "audit", Model: "sonnet", Unattended: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launch.Dir != proj {
+		t.Fatalf("dir = %q, want %q", launch.Dir, proj)
+	}
+	project := "project " + filepath.Join(proj, ".claude", "settings.json")
+	if !slices.ContainsFunc(launch.Notes, func(n string) bool { return strings.Contains(n, project) }) {
+		t.Fatalf("project settings should come from Dir, notes = %v", launch.Notes)
+	}
+	i := slices.Index(launch.Args, "-p")
+	want := []string{"-p", "audit", "--permission-mode", "bypassPermissions", "--model", "sonnet", "--verbose"}
+	if i < 0 || !slices.Equal(launch.Args[i:], want) {
+		t.Fatalf("args = %q, want them to end with %q", launch.Args, want)
+	}
+}
+
+func TestPrepareRejectsBadHeadlessOrDir(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for name, opts := range map[string]wrapper.Options{
+		"no prompt":   {Headless: &wrapper.Headless{Model: "sonnet"}},
+		"missing dir": {Dir: filepath.Join(t.TempDir(), "nope")},
+		"file as dir": {Dir: file},
+	} {
+		opts.Agent = "claude"
+		opts.Pack = pack.Local("examples/pack")
+		if _, err := wrapper.Prepare(context.Background(), opts); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}

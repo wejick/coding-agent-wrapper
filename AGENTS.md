@@ -19,6 +19,8 @@ adapter.go              Adapter and Skills interfaces + registry (Register,
 resolve.go              PATH resolution that never recurses into the wrapper
 exec_unix.go            in-place exec (syscall.Exec), the happy path on UNIX
 exec_other.go           fork/exec fallback for non-UNIX
+run_child.go            Launch.RunChild: headless child runs with signal
+                        forwarding and cancellation
 pack/
   pack.go               pack loading, Source interface (Local/Git), metadata
   git.go                git-backed distribution: clone, refresh, ref pinning,
@@ -47,8 +49,9 @@ examples/pack/          complete example org pack (also used by tests)
 docs/
   config-layers.md      the configuration layering model (canonical reference)
   adapters.md           how to add an agent adapter
-  embedding.md          caller-side refresh policy (Options.Fetched) and
-                        listing pack skills (Adapter.Skills)
+  embedding.md          caller-side refresh policy (Options.Fetched),
+                        listing pack skills (Adapter.Skills) and headless
+                        launches (Options.Dir, Options.Headless, RunChild)
   tools.md              tools.json, the launch check and wr init
 ```
 

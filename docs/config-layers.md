@@ -50,7 +50,9 @@ At launch, the wrapper reads and applies files in this order:
    `"model": "opus"`, the merged file contains `opus`.
 3. It merges in `<project>/.claude/settings.json`, then
    `<project>/.claude/settings.local.json`. These sit above the user's
-   settings, matching Claude Code's native precedence.
+   settings, matching Claude Code's native precedence. `<project>` is
+   `Options.Dir` when the embedding binary sets it, otherwise the current
+   directory.
 4. It applies `policy.json` into the file last, so neither the user nor a
    project can override those values. Launching with `--no-policy` skips
    this step.
