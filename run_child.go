@@ -60,33 +60,29 @@ func (l *Launch) RunChild(ctx context.Context, o RunOptions) (int, error) {
 	// starts is forwarded instead of killing the caller.
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, forwardSignals...)
-	defer signal.Stop(sigs)
 	if err := cmd.Start(); err != nil {
+		signal.Stop(sigs)
 		return -1, err
 	}
-	done := make(chan struct{})
 	go func() {
-		for {
-			select {
-			case s := <-sigs:
-				_ = cmd.Process.Signal(s)
-			case <-done:
-				return
-			}
+		for s := range sigs {
+			_ = cmd.Process.Signal(s)
 		}
 	}()
 	err := cmd.Wait()
-	close(done)
+	signal.Stop(sigs) // no signal is delivered after Stop returns
+	close(sigs)
 
 	if cmd.ProcessState == nil {
 		return -1, err
 	}
 	code := cmd.ProcessState.ExitCode()
 	if code < 0 {
+		err = fmt.Errorf("wrapper: %s: %s", l.Binary, cmd.ProcessState)
 		if ctx.Err() != nil {
-			return -1, fmt.Errorf("wrapper: %s: %s: %w", l.Binary, cmd.ProcessState, ctx.Err())
+			err = fmt.Errorf("%w: %w", err, ctx.Err())
 		}
-		return -1, fmt.Errorf("wrapper: %s: %s", l.Binary, cmd.ProcessState)
+		return -1, err
 	}
 	if ctx.Err() != nil {
 		return code, ctx.Err()

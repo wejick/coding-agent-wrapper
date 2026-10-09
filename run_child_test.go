@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -26,33 +27,16 @@ func script(t *testing.T, body string) string {
 	return path
 }
 
-// whenReady runs fn once the child signals it is ready by creating path.
-// The test waits for the polling goroutine before it completes.
-func whenReady(t *testing.T, path string, fn func()) {
-	stop, finished := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() {
-		close(stop)
-		<-finished
-	})
-	go func() {
-		defer close(finished)
-		deadline := time.After(10 * time.Second)
-		for {
-			if _, err := os.Stat(path); err == nil {
-				fn()
-				return
-			}
-			select {
-			case <-stop:
-				return
-			case <-deadline:
-				t.Errorf("child never created %s", path)
-				fn() // unblock RunChild so the test can finish
-				return
-			case <-time.After(10 * time.Millisecond):
-			}
-		}
-	}()
+// onReady is a Stdout writer that calls fn on the child's first write;
+// the test scripts print "ready" once their traps are set.
+type onReady struct {
+	once *sync.Once
+	fn   func()
+}
+
+func (w onReady) Write(b []byte) (int, error) {
+	w.once.Do(w.fn)
+	return len(b), nil
 }
 
 func TestRunChildDirEnvStdinAndExitCode(t *testing.T) {
@@ -101,21 +85,18 @@ func TestRunChildStartFailure(t *testing.T) {
 }
 
 func TestRunChildForwardsSignals(t *testing.T) {
-	ready := filepath.Join(t.TempDir(), "ready")
-	launch := &wrapper.Launch{Binary: script(t, `trap 'exit 7' INT; touch "$1"; while :; do sleep 0.05; done`), Args: []string{ready}}
-	whenReady(t, ready, func() { _ = syscall.Kill(os.Getpid(), syscall.SIGINT) })
-	code, err := launch.RunChild(context.Background(), wrapper.RunOptions{})
+	launch := &wrapper.Launch{Binary: script(t, `trap 'exit 7' INT; echo ready; while :; do sleep 0.05; done`)}
+	interrupt := func() { _ = syscall.Kill(os.Getpid(), syscall.SIGINT) }
+	code, err := launch.RunChild(context.Background(), wrapper.RunOptions{Stdout: onReady{new(sync.Once), interrupt}})
 	if err != nil || code != 7 {
 		t.Fatalf("the child should get the caller's SIGINT: code = %d, err = %v", code, err)
 	}
 }
 
 func TestRunChildCancelTerminates(t *testing.T) {
-	ready := filepath.Join(t.TempDir(), "ready")
-	launch := &wrapper.Launch{Binary: script(t, `trap 'exit 5' TERM; touch "$1"; while :; do sleep 0.05; done`), Args: []string{ready}}
+	launch := &wrapper.Launch{Binary: script(t, `trap 'exit 5' TERM; echo ready; while :; do sleep 0.05; done`)}
 	ctx, cancel := context.WithCancel(context.Background())
-	whenReady(t, ready, cancel)
-	code, err := launch.RunChild(ctx, wrapper.RunOptions{})
+	code, err := launch.RunChild(ctx, wrapper.RunOptions{Stdout: onReady{new(sync.Once), cancel}})
 	if code != 5 || !errors.Is(err, context.Canceled) {
 		t.Fatalf("code = %d, err = %v, want 5 and context.Canceled", code, err)
 	}
@@ -125,11 +106,9 @@ func TestRunChildCancelKillsAfterGrace(t *testing.T) {
 	old := *wrapper.KillGrace
 	*wrapper.KillGrace = 200 * time.Millisecond
 	t.Cleanup(func() { *wrapper.KillGrace = old })
-	ready := filepath.Join(t.TempDir(), "ready")
-	launch := &wrapper.Launch{Binary: script(t, `trap '' TERM; touch "$1"; while :; do sleep 0.05; done`), Args: []string{ready}}
+	launch := &wrapper.Launch{Binary: script(t, `trap '' TERM; echo ready; while :; do sleep 0.05; done`)}
 	ctx, cancel := context.WithCancel(context.Background())
-	whenReady(t, ready, cancel)
-	code, err := launch.RunChild(ctx, wrapper.RunOptions{})
+	code, err := launch.RunChild(ctx, wrapper.RunOptions{Stdout: onReady{new(sync.Once), cancel}})
 	if code != -1 || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "killed") {
 		t.Fatalf("code = %d, err = %v, want -1 and a killed error wrapping context.Canceled", code, err)
 	}

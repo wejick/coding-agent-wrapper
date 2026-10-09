@@ -27,16 +27,22 @@ func fakeBinary(t *testing.T) {
 	t.Setenv("PATH", dir)
 }
 
+// dirWithSettings returns a new directory holding .claude/settings.json.
+func dirWithSettings(t *testing.T, settings string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func homeWithUserSettings(t *testing.T, settings string) {
 	t.Helper()
-	home := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
+	t.Setenv("HOME", dirWithSettings(t, settings))
 }
 
 func testPack(t *testing.T) *pack.Pack {
@@ -202,21 +208,11 @@ func TestBuildProjectLayering(t *testing.T) {
 func TestBuildDirOverridesProjectDir(t *testing.T) {
 	fakeBinary(t)
 	t.Setenv("HOME", t.TempDir())
-	project := func(model string) string {
-		dir := t.TempDir()
-		if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte(`{"model":"`+model+`"}`), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return dir
-	}
 	a := claude.New()
 	a.CacheDir = t.TempDir()
-	a.ProjectDir = project("fallback-model")
+	a.ProjectDir = dirWithSettings(t, `{"model":"fallback-model"}`)
 
-	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{Dir: project("dir-model")})
+	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{Dir: dirWithSettings(t, `{"model":"dir-model"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,8 +227,9 @@ func TestBuildHeadless(t *testing.T) {
 	a := claude.New()
 	a.CacheDir = t.TempDir()
 	a.ProjectDir = t.TempDir()
+	p := testPack(t)
 
-	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{
 		Args: []string{"--output-format", "json"},
 		Headless: &wrapper.Headless{
 			Prompt:     "/audit:readiness /src/page",
@@ -269,7 +266,7 @@ func TestBuildHeadless(t *testing.T) {
 	}
 
 	// Only the prompt is required; unset fields add no flags.
-	launch, err = a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+	launch, err = a.Build(context.Background(), p, wrapper.BuildOptions{
 		Headless: &wrapper.Headless{Prompt: "task"},
 	})
 	if err != nil {
@@ -280,7 +277,7 @@ func TestBuildHeadless(t *testing.T) {
 	}
 
 	for _, prompt := range []string{"", "--help me"} {
-		if _, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
+		if _, err := a.Build(context.Background(), p, wrapper.BuildOptions{
 			Headless: &wrapper.Headless{Prompt: prompt},
 		}); err == nil {
 			t.Errorf("prompt %q: expected an error", prompt)
@@ -291,19 +288,11 @@ func TestBuildHeadless(t *testing.T) {
 func TestBuildHeadlessNotesDisabledBypass(t *testing.T) {
 	fakeBinary(t)
 	t.Setenv("HOME", t.TempDir())
-	proj := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(proj, ".claude"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(proj, ".claude", "settings.json"),
-		[]byte(`{"permissions":{"disableBypassPermissionsMode":"disable"}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	a := claude.New()
 	a.CacheDir = t.TempDir()
 
 	launch, err := a.Build(context.Background(), testPack(t), wrapper.BuildOptions{
-		Dir:      proj,
+		Dir:      dirWithSettings(t, `{"permissions":{"disableBypassPermissionsMode":"disable"}}`),
 		Headless: &wrapper.Headless{Prompt: "task", Unattended: true},
 	})
 	if err != nil {
