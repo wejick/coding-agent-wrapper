@@ -1,0 +1,7 @@
+{
+  "node": { "min_version": "20.0.0" },
+  "openspec": {
+    "min_version": "1.10.0",
+    "install": { "manager": "npm", "package": "@fission-ai/openspec" }
+  }
+}

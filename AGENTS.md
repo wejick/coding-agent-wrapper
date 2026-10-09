@@ -25,6 +25,10 @@ pack/
                         offline fallback, #subdir roots
   merge.go              semantic JSON deep-merge (union arrays) + env merging
   skills.go             SkillDirs: lists SKILL.md skills (name, description)
+tools/
+  tools.go              tools.json: required tools and how to install them
+  check.go              Check: PATH lookup and bounded --version calls
+  install.go            Plan and Run: installs through npm, pnpm, bun or go
 adapters/claude/
   claude.go             Claude Code adapter: builds the launch from the pack
   claude_test.go        asserts on computed launches and merged settings
@@ -37,13 +41,15 @@ adapters/internal/mergedfile/
                         config files, tolerant JSON/JSONC config reads
 e2e_test.go            black-box tests: build the wr binary, drive it with a
                        fake agent, pin the exec model and anti-recursion
-cmd/wr/main.go          reference CLI: run, doctor, sync, agents
+cmd/wr/main.go          reference CLI: run, doctor, sync, init, agents
+cmd/wr/init.go          wr init: install the pack's required tools
 examples/pack/          complete example org pack (also used by tests)
 docs/
   config-layers.md      the configuration layering model (canonical reference)
   adapters.md           how to add an agent adapter
   embedding.md          caller-side refresh policy (Options.Fetched) and
                         listing pack skills (Adapter.Skills)
+  tools.md              tools.json, the launch check and wr init
 ```
 
 ## Commands

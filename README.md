@@ -67,10 +67,11 @@ wr doctor                       # setup check: binaries found? pack state?
 wr --pack ./examples/pack doctor        # ...and the computed launch, with reasons
 wr --pack ./examples/pack claude        # run real Claude Code with the example pack
 wr --pack ./examples/pack opencode      # run real OpenCode with the example pack
+wr --pack ./examples/pack init          # install the tools the pack requires
 ```
 
-`examples/pack` is a complete example org pack. `doctor` never runs anything.
-It prints the binary, the exact arguments, injected env vars and a decision
+`examples/pack` is a complete example org pack. `doctor` never starts an
+agent; it only runs the pack's required tools with `--version`. It prints the binary, the exact arguments, injected env vars and a decision
 trail.
 
 ### 2. Create your org pack
@@ -80,6 +81,8 @@ uses the format the agent natively understands:
 
 ```
 version.json              metadata: {"name": "...", "version": "..."}
+tools.json                tools the pack needs, checked at launch and
+                          installed by `wr init`
 claude/
   settings.json           org defaults (users and projects always win)
   policy.json             locked layer, applied by default (--no-policy
@@ -131,6 +134,7 @@ pack URL and ref are baked in, so there is nothing for them to configure.
 | Doc | Contents |
 | --- | --- |
 | [docs/config-layers.md](docs/config-layers.md) | The layering model: how org defaults, policy, user settings, project settings and CLI flags combine; `settings.json` vs `policy.json`; env, MCP and plugin interaction |
+| [docs/tools.md](docs/tools.md) | Declaring the tools a pack needs, the launch check, and installing them with `wr init` |
 | [docs/adapters.md](docs/adapters.md) | Supporting a new agent (pi, ...) behind the `Adapter` interface |
 | [AGENTS.md](AGENTS.md) | Repository layout, design principles, build and test conventions |
 

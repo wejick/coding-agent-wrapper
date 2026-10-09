@@ -41,9 +41,13 @@ package wrapper
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
+	"time"
 
 	"github.com/wejick/coding-agent-wrapper/pack"
+	"github.com/wejick/coding-agent-wrapper/tools"
 )
 
 // Options configures a launch.
@@ -69,8 +73,19 @@ type Options struct {
 	StrictMCP bool
 	// Env is the base environment for the child; nil means os.Environ.
 	Env []string
+	// SetupCommand is the command users run to install the pack's
+	// required tools, such as "wr init". When set, warnings about a tool
+	// the pack can install end with "Run `<SetupCommand>`.", or with why
+	// the setup command would refuse to install it; otherwise they name
+	// the version to install.
+	SetupCommand string
+	// SkipTools skips checking the tools the pack requires (tools.json).
+	// Callers that check them separately, such as a doctor command, set
+	// it to avoid running every tool once per launch they prepare.
+	SkipTools bool
 	// Stdin, Stdout and Stderr are used on platforms without in-place exec;
-	// on UNIX the child inherits the process's streams.
+	// on UNIX the child inherits the process's streams. Run also writes
+	// the launch warnings to Stderr (os.Stderr when nil).
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -79,20 +94,27 @@ type Options struct {
 // Launch is a computed launch: everything needed to start the agent, plus a
 // decision trail explaining what the wrapper layered on.
 type Launch struct {
-	Agent       string         `json:"agent"`
-	Binary      string         `json:"binary"`
-	Args        []string       `json:"args"`
-	Env         []string       `json:"env,omitempty"`
-	Notes       []string       `json:"notes,omitempty"`
+	Agent  string   `json:"agent"`
+	Binary string   `json:"binary"`
+	Args   []string `json:"args"`
+	Env    []string `json:"env,omitempty"`
+	Notes  []string `json:"notes,omitempty"`
+	// Warnings are problems the user can act on, such as a required tool
+	// that is missing or too old. They are also listed in Notes. A
+	// warning never blocks the launch; wrappers print them before
+	// executing the agent.
+	Warnings    []string       `json:"warnings,omitempty"`
 	Files       []string       `json:"files,omitempty"`
 	Source      string         `json:"pack_source,omitempty"`
 	PackVersion map[string]any `json:"pack_version,omitempty"`
 }
 
 // Prepare resolves the agent, fetches the defaults pack and computes the
-// launch without running anything. Use it for diagnostics, tests and
-// tooling that needs to know exactly what would execute; Run is Prepare
-// followed by Launch.Exec.
+// launch without starting the agent. The only commands it runs are
+// `<tool> --version` for the tools the pack requires (none with
+// SkipTools). Use it for diagnostics, tests and tooling that needs to
+// know exactly what would execute; Run is Prepare followed by
+// Launch.Exec.
 func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	if opts.Agent == "" {
 		return nil, errors.New("wrapper: no agent specified")
@@ -131,16 +153,93 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	launch.Source = opts.Pack.Describe() + " (" + res.From + ")"
 	launch.PackVersion = p.Version
 	launch.Notes = append(launch.Notes, p.Notes...)
+	if !opts.SkipTools {
+		launch.Warnings = append(launch.Warnings, toolWarnings(ctx, p.Dir, opts)...)
+		launch.Notes = append(launch.Notes, launch.Warnings...)
+	}
 	return launch, nil
 }
 
-// Run prepares the launch and starts the agent. On UNIX it replaces the
-// current process (it never returns on success); elsewhere it runs the agent
-// as a child and waits, returning its error.
+// toolWarnings checks the tools the pack requires and returns one warning
+// per problem. A tools.json that cannot be read becomes a warning too, so
+// it never blocks a launch.
+func toolWarnings(ctx context.Context, dir string, opts Options) []string {
+	reqs, err := tools.Load(dir)
+	if err != nil {
+		return []string{fmt.Sprintf("required tools were not checked: %v", err)}
+	}
+	statuses := tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env})
+	var refused map[string]error
+	if opts.SetupCommand != "" {
+		refused = refusedInstalls(ctx, statuses, opts.Env)
+	}
+	var warnings []string
+	for _, s := range statuses {
+		problem := s.Problem()
+		if problem == "" {
+			continue
+		}
+		switch {
+		case s.Install == nil || opts.SetupCommand == "":
+			problem += fmt.Sprintf(" Install %s %s or newer.", s.Name, s.MinVersion)
+		case refused[s.Name] != nil:
+			problem += fmt.Sprintf(" `%s` cannot install it: %v.", opts.SetupCommand, refused[s.Name])
+		default:
+			problem += " Run `" + opts.SetupCommand + "`."
+		}
+		warnings = append(warnings, problem)
+	}
+	return warnings
+}
+
+// planTimeout bounds the install planning a launch does for broken tools.
+const planTimeout = 3 * time.Second
+
+// refusedInstalls plans the installs for the tools that are not ok and
+// returns, per tool, why the setup command would refuse to install it, so
+// a warning never sends the user to a command that cannot help. It runs
+// nothing when every tool is ok. When planning does not finish in time it
+// returns nil and the warnings point to the setup command as usual.
+func refusedInstalls(ctx context.Context, statuses []tools.Status, env []string) map[string]error {
+	var broken []tools.Status
+	for _, s := range statuses {
+		if s.State != tools.OK && s.Install != nil {
+			broken = append(broken, s)
+		}
+	}
+	if len(broken) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, planTimeout)
+	defer cancel()
+	steps := tools.Plan(ctx, broken, tools.PlanOptions{Env: env})
+	if ctx.Err() != nil {
+		return nil
+	}
+	refused := map[string]error{}
+	for _, st := range steps {
+		if st.Err != nil {
+			refused[st.Tool] = st.Err
+		}
+	}
+	return refused
+}
+
+// Run prepares the launch, prints its warnings as "note: ..." lines and
+// starts the agent. On UNIX it replaces the current process (it never
+// returns on success); elsewhere it runs the agent as a child and waits,
+// returning its error.
 func Run(ctx context.Context, opts Options) error {
 	launch, err := Prepare(ctx, opts)
 	if err != nil {
 		return err
+	}
+	stderr := opts.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+	for _, w := range launch.Warnings {
+		fmt.Fprintln(stderr, "note: "+w)
 	}
 	return launch.Exec(ExecOptions{
 		Stdin:  opts.Stdin,

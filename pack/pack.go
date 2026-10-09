@@ -5,6 +5,8 @@
 // A pack is any directory containing one subdirectory per agent:
 //
 //	version.json          optional: {"name": "...", "version": "..."}
+//	tools.json            optional: tools the pack requires on the user's
+//	                      machine, read by the tools package
 //	claude/               defaults for the Claude Code adapter
 //	  settings.json         soft defaults (user settings win per key)
 //	  policy.json           locked layer (applied on top by default)

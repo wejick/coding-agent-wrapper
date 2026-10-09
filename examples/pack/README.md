@@ -7,6 +7,9 @@ repo becomes your organization's defaults pack.
 ## What each file does
 
 - `version.json`: pack metadata, shown by `wr doctor` and `wr sync`.
+- `tools.json`: tools the pack expects on the developer's machine. Each
+  launch notes a missing or outdated one, and `wr init` installs it (see
+  [docs/tools.md](../../docs/tools.md)).
 - `claude/settings.json`: org defaults. Merged under the developer's user
   and project settings, so their choices win per key.
 - `claude/policy.json`: locked layer, applied over everything the wrapper
