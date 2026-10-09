@@ -35,9 +35,8 @@ type SkillLister interface {
 }
 ```
 
-Read the same directory `Build` passes to the agent. When the agent uses
-the shared `skills/<name>/SKILL.md` layout, `pack.ReadSkills(dir)` does
-the reading. See [embedding.md](embedding.md) for how callers use it.
+Read the same directory `Build` passes to the agent. `pack.ReadSkills(dir)`
+finds every `SKILL.md` under a directory and reads its frontmatter. See [embedding.md](embedding.md) for how callers use it.
 
 ## Rules every adapter should follow
 

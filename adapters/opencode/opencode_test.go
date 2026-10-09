@@ -338,3 +338,28 @@ func TestSkillsEmptyWithoutConfigDir(t *testing.T) {
 		t.Fatalf("skills = %+v, err = %v", skills, err)
 	}
 }
+
+func TestSkillsReadsSingularSkillDir(t *testing.T) {
+	root := t.TempDir()
+	for _, rel := range []string{"skill/review", "skills/commit-style"} {
+		dir := filepath.Join(root, "opencode", "config", rel)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		body := "---\nname: " + filepath.Base(rel) + "\ndescription: x\n---\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := pack.Load(root, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skills, err := opencode.New().Skills(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(skills) != 2 || skills[0].Name != "review" || skills[1].Name != "commit-style" {
+		t.Fatalf("skills = %+v", skills)
+	}
+}

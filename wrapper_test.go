@@ -97,6 +97,28 @@ func TestPrepareUsesFetchedPack(t *testing.T) {
 	}
 }
 
+func TestPrepareNotesRefreshIgnoredWithFetchedPack(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+
+	fetched := &pack.FetchResult{Dir: "examples/pack", From: "cache"}
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:   "claude",
+		Pack:    fetchFails{},
+		Fetched: fetched,
+		Refresh: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(launch.Notes, "refresh not attempted: the caller passed an already-fetched pack") {
+		t.Fatalf("notes should say the refresh was skipped, got %v", launch.Notes)
+	}
+	if len(fetched.Notes) != 0 {
+		t.Fatalf("Prepare must not modify the caller's fetch result, got %v", fetched.Notes)
+	}
+}
+
 func TestPrepareUnknownAgent(t *testing.T) {
 	registerAdapter(t)
 	if _, err := wrapper.Prepare(context.Background(), wrapper.Options{

@@ -17,34 +17,62 @@ type Skill struct {
 	Path string `json:"path"`
 }
 
-// ReadSkills lists the skills in dir: one subdirectory per skill, each
-// holding a SKILL.md that opens with YAML frontmatter. Claude Code plugins
-// and OpenCode config directories share this layout. Subdirectories
-// without a SKILL.md are skipped, and a missing dir has no skills. Skills
-// are sorted by directory name.
+// ReadSkills lists the skills under dir: every SKILL.md at any depth, the
+// way OpenCode's "skills/**/SKILL.md" scan finds them, so skills can be
+// grouped in subdirectories (skills/team/review/SKILL.md). Each SKILL.md
+// opens with YAML frontmatter. Symlinked directories are followed, hidden
+// entries are skipped, and a missing dir has no skills. Skills come back
+// in path order.
 func ReadSkills(dir string) ([]Skill, error) {
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
 	var skills []Skill
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		path := filepath.Join(dir, e.Name(), "SKILL.md")
-		data, err := os.ReadFile(path)
-		if os.IsNotExist(err) {
-			continue
-		}
+	seen := map[string]bool{}
+	var walk func(dir string) error
+	walk = func(dir string) error {
+		// A symlink loop would otherwise recurse forever.
+		real, err := filepath.EvalSymlinks(dir)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		fm := frontmatter(string(data))
-		skills = append(skills, Skill{Name: fm["name"], Description: fm["description"], Path: path})
+		if seen[real] {
+			return nil
+		}
+		seen[real] = true
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			path := filepath.Join(dir, e.Name())
+			info, err := os.Stat(path) // follows symlinks
+			if err != nil {
+				continue // dangling symlink
+			}
+			if info.IsDir() {
+				if err := walk(path); err != nil {
+					return err
+				}
+				continue
+			}
+			if e.Name() != "SKILL.md" {
+				continue
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			fm := frontmatter(string(data))
+			skills = append(skills, Skill{Name: fm["name"], Description: fm["description"], Path: path})
+		}
+		return nil
+	}
+	if err := walk(dir); err != nil {
+		return nil, err
 	}
 	return skills, nil
 }
@@ -54,6 +82,7 @@ func ReadSkills(dir string) ([]Skill, error) {
 // quoted scalars, values continued on indented lines, and "|" and ">"
 // block scalars. It returns nil when there is no complete block.
 func frontmatter(doc string) map[string]string {
+	doc = strings.TrimPrefix(doc, "\ufeff")
 	lines := strings.Split(strings.ReplaceAll(doc, "\r\n", "\n"), "\n")
 	if strings.TrimSpace(lines[0]) != "---" {
 		return nil
@@ -84,6 +113,12 @@ func frontmatter(doc string) map[string]string {
 		case strings.HasPrefix(value, ">"):
 			value = strings.Join(strings.Fields(strings.Join(more, " ")), " ")
 		default:
+			// " #" starts a comment in a plain scalar.
+			if !strings.HasPrefix(value, "\"") && !strings.HasPrefix(value, "'") {
+				if i := strings.Index(value, " #"); i >= 0 {
+					value = strings.TrimSpace(value[:i])
+				}
+			}
 			if len(more) > 0 {
 				value = strings.Join(strings.Fields(value+" "+strings.Join(more, " ")), " ")
 			}

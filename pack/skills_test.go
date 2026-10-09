@@ -24,6 +24,23 @@ func TestReadSkills(t *testing.T) {
 	write("folded", "---\nname: folded\ndescription: >\n  First line\n  second line.\nallowed-tools: Read\n---\n")
 	write("continued", "---\r\nname: continued\r\ndescription: Starts here\r\n  and continues.\r\n---\r\n")
 	write("nometa", "# No frontmatter\n")
+	write("bom", "\ufeff---\nname: bom # saved by a Windows editor\ndescription: Has a BOM.\n---\n")
+	write("team/nested", "---\nname: nested\ndescription: Grouped under team/.\n---\n")
+	write(".hidden", "---\nname: hidden\n---\n")
+	// A skill shared by symlink, plus a loop that must not recurse forever.
+	shared := filepath.Join(t.TempDir(), "shared")
+	if err := os.MkdirAll(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shared, "SKILL.md"), []byte("---\nname: linked\ndescription: Shared.\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, filepath.Join(dir, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dir, filepath.Join(dir, "team", "loop")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "empty"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -36,11 +53,14 @@ func TestReadSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Skill{
+		{Name: "bom", Description: "Has a BOM.", Path: filepath.Join(dir, "bom", "SKILL.md")},
 		{Name: "continued", Description: "Starts here and continues.", Path: filepath.Join(dir, "continued", "SKILL.md")},
 		{Name: "folded", Description: "First line second line.", Path: filepath.Join(dir, "folded", "SKILL.md")},
+		{Name: "linked", Description: "Shared.", Path: filepath.Join(dir, "linked", "SKILL.md")},
 		{Path: filepath.Join(dir, "nometa", "SKILL.md")},
 		{Name: "plain", Description: "Plain description.", Path: filepath.Join(dir, "plain", "SKILL.md")},
 		{Name: "quoted", Description: "It's quoted: with a colon", Path: filepath.Join(dir, "quoted", "SKILL.md")},
+		{Name: "nested", Description: "Grouped under team/.", Path: filepath.Join(dir, "team", "nested", "SKILL.md")},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("skills =\n%+v\nwant\n%+v", got, want)

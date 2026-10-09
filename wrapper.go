@@ -61,7 +61,8 @@ type Options struct {
 	// Fetched is a pack the caller already fetched from Pack, for example
 	// after checking pack.Stale and refreshing. Prepare then uses it as
 	// is and does not fetch again, so Launch.Source and Launch.Notes
-	// describe this fetch. Refresh is ignored when Fetched is set.
+	// describe this fetch. Refresh is ignored when Fetched is set, and
+	// the launch notes say so.
 	Fetched *pack.FetchResult
 	// SkipPolicy skips the pack's policy layer and stops forcing pack env
 	// defaults, so the launch runs with soft defaults only. The zero
@@ -119,6 +120,9 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 		return nil, err
 	}
 	p.Notes = append(p.Notes, res.Notes...)
+	if opts.Fetched != nil && opts.Refresh {
+		p.Notes = append(p.Notes, "refresh not attempted: the caller passed an already-fetched pack")
+	}
 	launch, err := a.Build(ctx, p, BuildOptions{
 		Args:       opts.Args,
 		Env:        opts.Env,

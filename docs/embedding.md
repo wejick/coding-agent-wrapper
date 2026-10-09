@@ -31,17 +31,22 @@ err = wrapper.Run(ctx, wrapper.Options{
 
 The first fetch uses the cache (or clones on first use). When the
 checkout last synced more than an hour ago, the second fetch refreshes it;
-a refresh that fails falls back to the cached copy. With `Fetched` set, `Prepare` loads the
+a refresh that fails falls back to the cached copy. A failed refresh does
+not update the sync time, so while the remote is unreachable every launch
+retries the refresh and waits for git to give up. Pass a `ctx` with a
+timeout to the refreshing fetch if that wait matters. With `Fetched` set, `Prepare` loads the
 pack from `res.Dir` and does not fetch again. The returned launch then
 describes that fetch:
 
-- `Launch.Source` ends in `(git)` when `res` came from a successful
-  refresh, and in `(cache)` when it came from the cache.
+- `Launch.Source` ends in `res.From`: `(git)` after a clone or a
+  successful refresh, `(cache)` when the cached copy was used (including
+  after a failed refresh), and `(local)` for `pack.Local`.
 - `Launch.Notes` includes `res.Notes`, such as `refresh failed (...);
   using cached pack` when the remote could not be reached.
 
 `Pack` is still required, because `Launch.Source` uses its `Describe`
-label. `Options.Refresh` is ignored when `Fetched` is set.
+label. `Options.Refresh` is ignored when `Fetched` is set, and the launch
+notes record that.
 
 ## Listing the skills a pack provides
 
@@ -50,8 +55,13 @@ pack gives their agent, read from the same directory the launch loads:
 
 | Agent | Skills directory |
 | --- | --- |
-| Claude Code | `claude/plugin/skills/<name>/SKILL.md` |
-| OpenCode | `opencode/config/skills/<name>/SKILL.md` |
+| Claude Code | `claude/plugin/skills/**/SKILL.md` |
+| OpenCode | `opencode/config/{skill,skills}/**/SKILL.md` |
+
+Skills may be grouped in subdirectories, and symlinked skill directories
+are followed, so one skill can be shared between both agents by linking
+it. The Claude adapter does not list extra skill paths declared in the
+plugin's `plugin.json`.
 
 ```go
 p, err := pack.Load(res.Dir, src.Describe())
@@ -76,7 +86,6 @@ if sl, ok := a.(wrapper.SkillLister); ok {
 Each `pack.Skill` carries the `name` and `description` from the
 `SKILL.md` frontmatter and the path of the file. `Name` or `Description`
 is empty when the frontmatter does not set it, so a pack's CI can check
-that every skill has both. Skill directories without a `SKILL.md` are
-skipped, and an agent whose pack directory has no skills returns an empty
+that every skill has both. An agent whose pack directory has no skills returns an empty
 list. `wr doctor` prints the list under each agent's launch as `skill:`
 lines, and `wr doctor --json` includes it as `skills`.
