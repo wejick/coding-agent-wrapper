@@ -134,3 +134,5 @@ review replies.
   (a new agent adapter, a new command, a new distribution model). Small
   additions such as a helper function or a new `doctor` field stay in
   `docs/` and the code comments.
+- Commit messages and PR descriptions carry no `Co-Authored-By`, session
+  link or "Generated with" trailers. Write the message and stop.
