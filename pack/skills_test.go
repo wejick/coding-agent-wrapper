@@ -24,6 +24,7 @@ func TestReadSkills(t *testing.T) {
 	write("folded", "---\nname: folded\ndescription: >\n  First line\n  second line.\nallowed-tools: Read\n---\n")
 	write("continued", "---\r\nname: continued\r\ndescription: Starts here\r\n  and continues.\r\n---\r\n")
 	write("nometa", "# No frontmatter\n")
+	write("noname", "---\nname: \"\"\ndescription: No name key.\n---\n")
 	write("bom", "\ufeff---\nname: bom # saved by a Windows editor\ndescription: Has a BOM.\n---\n")
 	write("team/nested", "---\nname: nested\ndescription: Grouped under team/.\n---\n")
 	write("plain/templates", "---\nname: template\n---\n")
@@ -48,7 +49,7 @@ func TestReadSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := readSkills(dir)
+	got, err := SkillDirs{dir}.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +58,47 @@ func TestReadSkills(t *testing.T) {
 		{Name: "continued", Description: "Starts here and continues.", Path: filepath.Join(dir, "continued", "SKILL.md")},
 		{Name: "folded", Description: "First line second line.", Path: filepath.Join(dir, "folded", "SKILL.md")},
 		{Name: "linked", Description: "Shared.", Path: filepath.Join(dir, "linked", "SKILL.md")},
-		{Path: filepath.Join(dir, "nometa", "SKILL.md")},
+		{Name: "nested", Description: "Grouped under team/.", Path: filepath.Join(dir, "team", "nested", "SKILL.md")},
+		{Name: "nometa", Path: filepath.Join(dir, "nometa", "SKILL.md")},
+		{Name: "noname", Description: "No name key.", Path: filepath.Join(dir, "noname", "SKILL.md")},
 		{Name: "plain", Description: "Plain description.", Path: filepath.Join(dir, "plain", "SKILL.md")},
 		{Name: "quoted", Description: "It's quoted: with a colon", Path: filepath.Join(dir, "quoted", "SKILL.md")},
-		{Name: "nested", Description: "Grouped under team/.", Path: filepath.Join(dir, "team", "nested", "SKILL.md")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("skills =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestSkillDirsListSortsAcrossDirs(t *testing.T) {
+	a, b := t.TempDir(), t.TempDir()
+	write := func(root, name, skill string) {
+		t.Helper()
+		path := filepath.Join(root, name, "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("---\nname: "+skill+"\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(a, "x", "review")
+	write(a, "y", "commit-style")
+	write(b, "z", "commit-style")
+	write(b, "a", "lint")
+
+	got, err := SkillDirs{b, a}.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, second := filepath.Join(a, "y", "SKILL.md"), filepath.Join(b, "z", "SKILL.md")
+	if second < first {
+		first, second = second, first
+	}
+	want := []Skill{
+		{Name: "commit-style", Path: first},
+		{Name: "commit-style", Path: second},
+		{Name: "lint", Path: filepath.Join(b, "a", "SKILL.md")},
+		{Name: "review", Path: filepath.Join(a, "x", "SKILL.md")},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("skills =\n%+v\nwant\n%+v", got, want)

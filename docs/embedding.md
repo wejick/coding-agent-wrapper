@@ -88,10 +88,14 @@ if skills := a.Skills(p); skills != nil {
 ```
 
 Each `pack.Skill` carries the `name` and `description` from the
-`SKILL.md` frontmatter and the path of the file. `Name` or `Description`
-is empty when the frontmatter does not set it, so a pack's CI can check
-that every skill has both. An agent whose pack directory has no skills
-returns an empty list. `wr doctor` prints the list under each agent's launch as `skill:`
+`SKILL.md` frontmatter and the path of the file. When the frontmatter has
+no `name`, `Name` is the name of the directory holding `SKILL.md`, which
+is the name Claude Code gives the skill: `team/review/SKILL.md` without a
+`name` key is listed as `review`. `Description` is empty when the
+frontmatter does not set it, so a pack's CI can check that every skill
+has one. The list is sorted by `Name`, then by `Path`, across all of the
+agent's skill directories, so callers can print it as is. An agent whose
+pack directory has no skills returns an empty list. `wr doctor` prints the list under each agent's launch as `skill:`
 lines, and `wr doctor --json` includes it as `skills`.
 
 ## Running an agent headless
