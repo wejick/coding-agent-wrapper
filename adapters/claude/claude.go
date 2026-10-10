@@ -264,9 +264,10 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	return launch, nil
 }
 
-// Skills lists the org plugin's skills/ directory.
+// Skills lists the org plugin's skills/ directory. Claude Code names a
+// skill without a frontmatter name after its directory.
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
-	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
+	return pack.DirNamedSkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
 }
 
 // bypassDisabled reports whether the merged settings turn off

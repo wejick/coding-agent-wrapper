@@ -88,15 +88,27 @@ if skills := a.Skills(p); skills != nil {
 ```
 
 Each `pack.Skill` carries the `name` and `description` from the
-`SKILL.md` frontmatter and the path of the file. When the frontmatter has
-no `name`, `Name` is the name of the directory holding `SKILL.md`, which
-is the name Claude Code gives the skill: `team/review/SKILL.md` without a
-`name` key is listed as `review`. `Description` is empty when the
-frontmatter does not set it, so a pack's CI can check that every skill
-has one. The list is sorted by `Name`, then by `Path`, across all of the
-agent's skill directories, so callers can print it as is. An agent whose
-pack directory has no skills returns an empty list. `wr doctor` prints the list under each agent's launch as `skill:`
-lines, and `wr doctor --json` includes it as `skills`.
+`SKILL.md` frontmatter and the path of the file. `Description` is empty
+when the frontmatter does not set it. A missing `name` depends on the
+agent:
+
+- Claude Code names the skill after its directory, so the Claude adapter
+  lists `skills/review/SKILL.md` without a `name` key as `review` and
+  sets `NameFromDir`. A `SKILL.md` directly in `skills/` keeps an empty
+  `Name`.
+- OpenCode requires the `name` key, so the OpenCode adapter leaves `Name`
+  empty.
+
+A pack's CI can flag skills without a frontmatter name by checking for an
+empty `Name` or `NameFromDir`, and skills without a description by
+checking `Description`.
+
+The list is sorted by `Name`, then by `Path`, across all of the agent's
+skill directories, and a skill reached through two directories (for
+example a symlink) is listed once. An agent whose pack directory has no
+skills returns an empty, non-nil list. `wr doctor` prints the list under
+each agent's launch as `skill:` lines, and `wr doctor --json` includes it
+as `skills`.
 
 ## Running an agent headless
 

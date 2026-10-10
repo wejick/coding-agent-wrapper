@@ -70,6 +70,7 @@ type Adapter interface {
 
 // Skills is an agent's view of the skills in one pack.
 type Skills interface {
+	// List returns the skills sorted by Name, then by Path.
 	List() ([]pack.Skill, error)
 }
 

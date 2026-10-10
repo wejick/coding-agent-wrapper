@@ -24,6 +24,7 @@ type Adapter interface {
 // Skills is an agent's view of the skills in one pack. New skill
 // operations are added as methods here.
 type Skills interface {
+	// List returns the skills sorted by Name, then by Path.
 	List() ([]pack.Skill, error)
 }
 ```
@@ -36,10 +37,14 @@ human-readable `Notes` trail. `Run` = `Prepare` + `Exec`; adapters only own
 
 `Skills` must read the same directories `Build` points the agent at. When
 the agent uses `SKILL.md` files, return a `pack.SkillDirs` listing those
-directories: its `List` finds every `SKILL.md` under each one and reads
-the frontmatter. The Claude adapter returns
-`pack.SkillDirs{<pack>/claude/plugin/skills}`. An adapter for an agent
-without skills returns nil. See [embedding.md](embedding.md) for how
+directories: its `List` finds every `SKILL.md` under each one, reads the
+frontmatter and sorts the result. If the agent names a skill without a
+frontmatter `name` after its directory, return `pack.DirNamedSkillDirs`
+instead, so the listing matches what the agent loads. The Claude adapter
+returns `pack.DirNamedSkillDirs{<pack>/claude/plugin/skills}`; the
+OpenCode adapter returns a `pack.SkillDirs`, because OpenCode requires
+the `name` key. A custom `Skills` implementation must return its list in
+the same order. An adapter for an agent without skills returns nil. See [embedding.md](embedding.md) for how
 callers use it.
 
 ## Rules every adapter should follow
