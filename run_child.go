@@ -40,9 +40,15 @@ var killGrace = 10 * time.Second
 // RunChild returns the child's exit code. It returns -1 and an error when
 // the child could not start or was killed by a signal; that error wraps
 // ctx.Err() when ctx was done. When the child exits on its own after ctx
-// is done, it returns the exit code and ctx.Err(). An error copying the
-// child's output, or output still held open by a process the child left
-// behind 10 seconds after it exited, is returned with the exit code.
+// is done, it returns the exit code and ctx.Err(). An error from the
+// Stdout or Stderr writer is returned with the exit code.
+//
+// A process the child leaves behind (a background shell task, an MCP
+// server) can keep the child's stdout or stderr open after the child
+// exits. RunChild then stops reading that output 10 seconds after the
+// child exits and returns the exit code without an error; the child's
+// own output is complete, and what the leftover process writes later is
+// dropped.
 func (l *Launch) RunChild(ctx context.Context, o RunOptions) (int, error) {
 	cmd := exec.CommandContext(ctx, l.Binary, l.Args...)
 	cmd.Dir = l.Dir
@@ -87,8 +93,10 @@ func (l *Launch) RunChild(ctx context.Context, o RunOptions) (int, error) {
 	if ctx.Err() != nil {
 		return code, ctx.Err()
 	}
+	// exec reports ErrWaitDelay only after the child exited 0 while a
+	// leftover process held its output open; the exit code is the result.
 	var exitErr *exec.ExitError
-	if err != nil && !errors.As(err, &exitErr) {
+	if err != nil && !errors.As(err, &exitErr) && !errors.Is(err, exec.ErrWaitDelay) {
 		return code, err
 	}
 	return code, nil

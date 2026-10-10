@@ -180,9 +180,13 @@ The OpenCode adapter has no headless mapping yet and returns
    killed by a signal returns `-1` and an error, which wraps `ctx.Err()`
    when `ctx` was done. A child that exits on its own after `ctx` is done
    returns its exit code and `ctx.Err()`. A failing `Stdout` or `Stderr`
-   writer, or output that a process left behind by the child still holds
-   open 10 seconds after the child exits, returns the exit code with an
-   error.
+   writer returns the exit code with an error.
+6. A process the agent leaves behind (a background Bash task, an MCP
+   server) can keep the agent's stdout or stderr open after the agent
+   exits. `RunChild` stops reading that output 10 seconds after the
+   agent exits and returns the agent's exit code with no error: an agent
+   that exited 0 returns `(0, nil)`. The agent's own output is complete;
+   anything the leftover process writes later is dropped.
 
 `Launch.Exec` and `wrapper.Run` also start the agent in `Launch.Dir` when
 it is set, so an interactive launch with `Dir` runs where its project

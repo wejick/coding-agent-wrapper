@@ -125,3 +125,24 @@ func TestRunChildReportsOutputErrors(t *testing.T) {
 		t.Fatalf("code = %d, err = %v, want 0 and the writer's error", code, err)
 	}
 }
+
+func TestRunChildIgnoresOutputHeldByLeftoverProcess(t *testing.T) {
+	old := *wrapper.KillGrace
+	*wrapper.KillGrace = 200 * time.Millisecond
+	t.Cleanup(func() { *wrapper.KillGrace = old })
+	// The background sleep inherits stdout and keeps the pipe open after
+	// the agent exits 0.
+	launch := &wrapper.Launch{Binary: script(t, "echo verdict\nsleep 3 &\nexit 0\n")}
+	var out bytes.Buffer
+	start := time.Now()
+	code, err := launch.RunChild(context.Background(), wrapper.RunOptions{Stdout: &out})
+	if code != 0 || err != nil {
+		t.Fatalf("code = %d, err = %v, want 0 and no error", code, err)
+	}
+	if out.String() != "verdict\n" {
+		t.Fatalf("stdout = %q, want the agent's own output", out.String())
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("RunChild waited %v for the leftover process", elapsed)
+	}
+}
