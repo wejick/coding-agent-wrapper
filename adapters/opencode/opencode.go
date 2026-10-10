@@ -105,8 +105,13 @@ func (a *Adapter) binaryName() string {
 
 // Build implements Adapter. It computes the full launch for OpenCode from
 // the pack, layering org defaults under the user's config (and policy
-// above it unless o.SkipPolicy).
+// above it unless o.SkipPolicy). It returns ErrHeadlessUnsupported for a
+// headless launch. o.Dir needs no handling here: OpenCode reads project
+// config from the directory it starts in.
 func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOptions) (*wrapper.Launch, error) {
+	if o.Headless != nil {
+		return nil, fmt.Errorf("%s: %w", DirName, wrapper.ErrHeadlessUnsupported)
+	}
 	launch := &wrapper.Launch{Notes: []string{}, Files: []string{}}
 	binary, err := a.Locate()
 	if err != nil {

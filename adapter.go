@@ -2,6 +2,7 @@ package wrapper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -26,7 +27,32 @@ type BuildOptions struct {
 	// StrictMCP asks the agent to replace the user's MCP configuration
 	// instead of extending it, where the agent supports it.
 	StrictMCP bool
+	// Dir is the absolute working directory and project root of the
+	// launch; adapters read project config from it. Empty means the
+	// current working directory.
+	Dir string
+	// Headless asks for a non-interactive run. Adapters turn it into
+	// agent flags placed after the pack-injected flags and before Args,
+	// or return ErrHeadlessUnsupported. Nil means interactive.
+	Headless *Headless
 }
+
+// Headless describes a non-interactive run: the agent gets one task, runs
+// it without a user at the terminal and exits.
+type Headless struct {
+	// Prompt is the task to run. Required.
+	Prompt string
+	// Model is an optional model alias or name.
+	Model string
+	// Effort is an optional effort level.
+	Effort string
+	// Unattended turns off permission prompts.
+	Unattended bool
+}
+
+// ErrHeadlessUnsupported is returned by adapters whose agent has no
+// headless mode.
+var ErrHeadlessUnsupported = errors.New("wrapper: agent has no headless mode")
 
 // Adapter integrates one coding agent with the wrapper. Implement this to
 // support a new agent and register it from your binary with Register.

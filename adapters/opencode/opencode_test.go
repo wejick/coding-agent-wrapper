@@ -3,6 +3,7 @@ package opencode_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -298,6 +299,18 @@ func TestBuildEmptyPackIsVanilla(t *testing.T) {
 	}
 	if len(launch.Notes) == 0 || !strings.Contains(launch.Notes[0], "vanilla") {
 		t.Fatalf("expected a vanilla note, got %v", launch.Notes)
+	}
+}
+
+func TestBuildHeadlessUnsupported(t *testing.T) {
+	fakeBinary(t)
+	a := opencode.New()
+	a.CacheDir = t.TempDir()
+	_, err := a.Build(context.Background(), emptyPack(t), wrapper.BuildOptions{
+		Headless: &wrapper.Headless{Prompt: "task"},
+	})
+	if !errors.Is(err, wrapper.ErrHeadlessUnsupported) {
+		t.Fatalf("err = %v, want ErrHeadlessUnsupported", err)
 	}
 }
 

@@ -57,13 +57,21 @@ callers use it.
    model the Claude adapter implements.
 3. Put user args last. Append `o.Args` after injected flags so explicit
    user flags still apply.
-4. Never recurse into the wrapper. Resolve the real binary with
+4. Read project config from `o.Dir` when it is set (an absolute path);
+   fall back to the current directory otherwise. Agents that read
+   project config themselves need nothing here, because the agent starts
+   in `Launch.Dir`.
+5. Map `o.Headless` to the agent's non-interactive flags, after the
+   injected flags and before `o.Args`, with one note per field. When the
+   agent has no headless mode, return `wrapper.ErrHeadlessUnsupported`
+   (wrapped is fine) instead of ignoring the request.
+6. Never recurse into the wrapper. Resolve the real binary with
    `wrapper.ResolveBinary(name, nil)`; it skips the wrapper's own
    executable on PATH.
-5. Explain every decision. A merged layer, a skipped env var, an ignored
+7. Explain every decision. A merged layer, a skipped env var, an ignored
    policy: each becomes a line in `Launch.Notes`. `doctor` prints them;
    they are the primary debugging surface.
-6. Know the agent's injection points precisely. If a flag doesn't exist
+8. Know the agent's injection points precisely. If a flag doesn't exist
    on older agent versions, that's acceptable (the agent's own error
    surfaces it), but prefer the stable ones and document them in the
    package doc comment.
@@ -78,6 +86,7 @@ callers use it.
 | Skills, agents, commands | `--plugin-dir <dir>` (session-scoped plugin) | `OPENCODE_CONFIG_DIR` → pack `opencode/config/` | extensions |
 | System prompt | `--append-system-prompt-file` | `instructions` config key (unions across layers) | system prompt config |
 | Policy layer | merged on top, passed via `--settings` | `OPENCODE_CONFIG_CONTENT` env, above project config | merged into generated config |
+| Headless run | `-p`, `--permission-mode`, `--model`, `--effort` | not mapped (`ErrHeadlessUnsupported`) | planned |
 
 Agents without a native "extra config layer" mechanism (like Claude's
 `--settings`) need the generated-file approach: read the user's config,
@@ -97,7 +106,7 @@ pattern.
 Adapters are tested without any agent installed:
 
 - Put a fake executable named after the agent in a temp dir and `t.Setenv("PATH", dir)`, and `Locate` resolves it.
-- Set `t.Setenv("HOME", tmp)` and `a.ProjectDir = tmp2` to control every settings layer.
+- Set `t.Setenv("HOME", tmp)` and `a.ProjectDir = tmp2` (or `BuildOptions.Dir`) to control every settings layer.
 - Assert on the computed `Launch`: args order, merged-file contents, env diff, notes.
 - See `adapters/claude/claude_test.go` and
   `adapters/opencode/opencode_test.go` for the full pattern, including

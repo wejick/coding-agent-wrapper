@@ -44,6 +44,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/wejick/coding-agent-wrapper/pack"
@@ -73,6 +74,14 @@ type Options struct {
 	StrictMCP bool
 	// Env is the base environment for the child; nil means os.Environ.
 	Env []string
+	// Dir is the agent's working directory and project root: adapters
+	// read project config from it and the agent starts in it. Empty
+	// means the current working directory.
+	Dir string
+	// Headless runs the agent non-interactively on one task. Nil means
+	// an interactive launch. Agents without a headless mode fail with
+	// ErrHeadlessUnsupported.
+	Headless *Headless
 	// SetupCommand is the command users run to install the pack's
 	// required tools, such as "wr init". When set, warnings about a tool
 	// the pack can install end with "Run `<SetupCommand>`.", or with why
@@ -98,7 +107,10 @@ type Launch struct {
 	Binary string   `json:"binary"`
 	Args   []string `json:"args"`
 	Env    []string `json:"env,omitempty"`
-	Notes  []string `json:"notes,omitempty"`
+	// Dir is the absolute directory the agent starts in; empty means the
+	// caller's working directory.
+	Dir   string   `json:"dir,omitempty"`
+	Notes []string `json:"notes,omitempty"`
 	// Warnings are problems the user can act on, such as a required tool
 	// that is missing or too old. They are also listed in Notes. A
 	// warning never blocks the launch; wrappers print them before
@@ -126,6 +138,20 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	if opts.Pack == nil {
 		return nil, errors.New("wrapper: no defaults pack configured")
 	}
+	if opts.Headless != nil && opts.Headless.Prompt == "" {
+		return nil, errors.New("wrapper: headless launch needs a prompt")
+	}
+	dir := opts.Dir
+	if dir != "" {
+		if dir, err = filepath.Abs(dir); err != nil {
+			return nil, err
+		}
+		if info, err := os.Stat(dir); err != nil {
+			return nil, fmt.Errorf("wrapper: launch directory: %w", err)
+		} else if !info.IsDir() {
+			return nil, fmt.Errorf("wrapper: launch directory %s is not a directory", dir)
+		}
+	}
 	res := opts.Fetched
 	if res == nil {
 		if res, err = opts.Pack.Fetch(ctx, pack.FetchOptions{Refresh: opts.Refresh}); err != nil {
@@ -145,11 +171,14 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 		Env:        opts.Env,
 		SkipPolicy: opts.SkipPolicy,
 		StrictMCP:  opts.StrictMCP,
+		Dir:        dir,
+		Headless:   opts.Headless,
 	})
 	if err != nil {
 		return nil, err
 	}
 	launch.Agent = a.Name()
+	launch.Dir = dir
 	launch.Source = opts.Pack.Describe() + " (" + res.From + ")"
 	launch.PackVersion = p.Version
 	launch.Notes = append(launch.Notes, p.Notes...)

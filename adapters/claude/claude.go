@@ -21,6 +21,14 @@
 //	                   and hooks as a Claude Code plugin
 //	system-prompt.md   --append-system-prompt-file <file>
 //
+// A headless launch (BuildOptions.Headless) adds print-mode flags after
+// the pack flags and before the user's arguments:
+//
+//	Prompt      -p <prompt>
+//	Unattended  --permission-mode bypassPermissions
+//	Model       --model <model>
+//	Effort      --effort <effort>
+//
 // See docs/config-layers.md for the layering model in depth.
 package claude
 
@@ -63,8 +71,9 @@ type Adapter struct {
 	Binary string
 	// UserSettingsPath overrides ~/.claude/settings.json (for tests).
 	UserSettingsPath string
-	// ProjectDir overrides the project root whose .claude/ directory holds
-	// project settings; default is the current working directory.
+	// ProjectDir is the project root whose .claude/ directory holds
+	// project settings when the launch sets no BuildOptions.Dir; default
+	// is the current working directory.
 	ProjectDir string
 	// CacheDir overrides where merged settings are written (for tests).
 	CacheDir string
@@ -92,6 +101,11 @@ func (a *Adapter) binaryName() string {
 // Code from the pack, layering org defaults under user settings (and policy
 // above them unless o.SkipPolicy).
 func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOptions) (*wrapper.Launch, error) {
+	// The headless prompt is a bare argument, so one starting with "-"
+	// would be parsed as a flag.
+	if h := o.Headless; h != nil && (h.Prompt == "" || strings.HasPrefix(h.Prompt, "-")) {
+		return nil, fmt.Errorf("%s: headless prompt %q must be non-empty and must not start with \"-\"", DirName, h.Prompt)
+	}
 	launch := &wrapper.Launch{Notes: []string{}, Files: []string{}}
 	binary, err := a.Locate()
 	if err != nil {
@@ -143,7 +157,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		merged = pack.MergeJSON(merged, user.value, rules)
 		labels = append(labels, "user "+user.path)
 	}
-	for _, sf := range a.projectSettings() {
+	for _, sf := range a.projectSettings(o.Dir) {
 		if sf.corrupt != "" {
 			launch.Notes = append(launch.Notes, fmt.Sprintf("%s settings %s could not be parsed (%s); org defaults may override it", sf.label, sf.path, sf.corrupt))
 			continue
@@ -219,7 +233,29 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		launch.Env = base
 	}
 
-	// 6. User args last so they still apply.
+	// 6. Headless flags, before the user's args so theirs still apply.
+	if h := o.Headless; h != nil {
+		args = append(args, "-p", h.Prompt)
+		launch.Notes = append(launch.Notes, fmt.Sprintf("headless: runs the prompt %q and exits (-p)", h.Prompt))
+		if h.Unattended {
+			args = append(args, "--permission-mode", "bypassPermissions")
+			if bypassDisabled(merged) {
+				launch.Notes = append(launch.Notes, "headless: unattended requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so tools that need permission will be denied")
+			} else {
+				launch.Notes = append(launch.Notes, "headless: unattended, permission prompts are skipped (--permission-mode bypassPermissions)")
+			}
+		}
+		if h.Model != "" {
+			args = append(args, "--model", h.Model)
+			launch.Notes = append(launch.Notes, fmt.Sprintf("headless: model %s (--model)", h.Model))
+		}
+		if h.Effort != "" {
+			args = append(args, "--effort", h.Effort)
+			launch.Notes = append(launch.Notes, fmt.Sprintf("headless: effort %s (--effort)", h.Effort))
+		}
+	}
+
+	// 7. User args last so they still apply.
 	launch.Args = append(args, o.Args...)
 
 	if !org {
@@ -231,6 +267,14 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 // Skills lists the org plugin's skills/ directory.
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
+}
+
+// bypassDisabled reports whether the merged settings turn off
+// bypassPermissions mode.
+func bypassDisabled(merged any) bool {
+	settings, _ := merged.(map[string]any)
+	perms, _ := settings["permissions"].(map[string]any)
+	return perms["disableBypassPermissionsMode"] == "disable"
 }
 
 // settingsFile is one settings layer on disk.
@@ -269,9 +313,12 @@ func (a *Adapter) userSettings() settingsFile {
 
 // projectSettings loads the native Claude Code project layers from the
 // project's .claude/ directory: the shared settings.json and the personal,
-// usually gitignored settings.local.json.
-func (a *Adapter) projectSettings() []settingsFile {
-	dir := a.ProjectDir
+// usually gitignored settings.local.json. The project root is dir, else
+// ProjectDir, else the current working directory.
+func (a *Adapter) projectSettings(dir string) []settingsFile {
+	if dir == "" {
+		dir = a.ProjectDir
+	}
 	if dir == "" {
 		var err error
 		if dir, err = os.Getwd(); err != nil {
