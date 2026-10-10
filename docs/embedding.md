@@ -153,10 +153,13 @@ field. For `/src/page` above, the arguments end in:
 
 A settings layer that sets `permissions.disableBypassPermissionsMode` to
 `"disable"` still applies and keeps Claude Code out of bypass mode, so
-`Unattended` has no effect under it; the unattended note says so. The
-prompt is passed as a bare argument, so the adapter rejects a prompt
-that starts with `-`. Flags such as `--output-format json` go in
-`Options.Args`.
+`Unattended` has no effect under it. Nobody can answer a permission
+prompt in print mode, so tool calls that need permission are denied; the
+unattended note says so. The prompt is passed as a bare argument, so the
+adapter rejects a prompt that starts with `-`. Flags such as
+`--output-format json` go in `Options.Args`. Keep `Options.Args` to flags
+in a headless launch: a positional argument there lands after the prompt
+and Claude Code reads it as more prompt text.
 The OpenCode adapter has no headless mapping yet and returns
 `wrapper.ErrHeadlessUnsupported`; check for it with `errors.Is`.
 
@@ -185,7 +188,9 @@ The OpenCode adapter has no headless mapping yet and returns
    server) can keep the agent's stdout or stderr open after the agent
    exits. `RunChild` stops reading that output 10 seconds after the
    agent exits and returns the agent's exit code with no error: an agent
-   that exited 0 returns `(0, nil)`. The agent's own output is complete;
+   that exited 0 returns `(0, nil)`. `exec.Cmd.Wait` reports
+   `exec.ErrWaitDelay` for this case and `RunChild` drops it, so callers
+   need no `errors.Is` check for it. The agent's own output is complete;
    anything the leftover process writes later is dropped.
 
 `Launch.Exec` and `wrapper.Run` also start the agent in `Launch.Dir` when

@@ -240,7 +240,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		if h.Unattended {
 			args = append(args, "--permission-mode", "bypassPermissions")
 			if bypassDisabled(merged) {
-				launch.Notes = append(launch.Notes, "headless: unattended requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so permission prompts still apply")
+				launch.Notes = append(launch.Notes, "headless: unattended requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so tools that need permission will be denied")
 			} else {
 				launch.Notes = append(launch.Notes, "headless: unattended, permission prompts are skipped (--permission-mode bypassPermissions)")
 			}

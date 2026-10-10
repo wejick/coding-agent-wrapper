@@ -299,7 +299,7 @@ func TestBuildHeadlessNotesDisabledBypass(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.ContainsFunc(launch.Notes, func(n string) bool {
-		return strings.Contains(n, "permission prompts still apply")
+		return strings.Contains(n, "tools that need permission will be denied")
 	}) {
 		t.Fatalf("expected a note that bypass mode is disabled, got %q", launch.Notes)
 	}
