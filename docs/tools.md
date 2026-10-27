@@ -104,11 +104,8 @@ bounded at 3 seconds; when it runs out of time the warning falls back to
 the launch. `wrapper.Run` prints them to `Options.Stderr` (standard error
 by default) as `note: ...` lines before starting the agent.
 
-Each `--version` call gets 2 seconds (`tools.DefaultTimeout`). A Node
-CLI on its first run after a reboot can take longer, and the check then
-reports it as `too_old` on that launch. `Options.ToolTimeout` sets a
-longer bound for every call of the launch's check; zero keeps the
-default.
+`Options.ToolTimeout` replaces the 2 second bound on each `--version`
+call, for tools with a slow cold start.
 
 `Options.SkipTools` turns the check off. `wr doctor` sets it and checks
 the tools once itself, instead of once per agent launch it prepares. It

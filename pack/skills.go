@@ -11,9 +11,7 @@ import (
 
 // Skill is read from a SKILL.md frontmatter.
 type Skill struct {
-	// Name is the frontmatter name, or the name of the directory holding
-	// SKILL.md when the frontmatter sets none, which is how the agents
-	// name such a skill.
+	// Name is the frontmatter name, else the skill's directory name.
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Path        string `json:"path"`
@@ -22,8 +20,7 @@ type Skill struct {
 // SkillDirs implements wrapper.Skills over directories of SKILL.md files.
 type SkillDirs []string
 
-// List returns the skills in every directory, sorted by Name and then by
-// Path, so skills that share a name keep a stable order.
+// List returns the skills sorted by Name, then Path.
 func (d SkillDirs) List() ([]Skill, error) {
 	var skills []Skill
 	for _, dir := range d {

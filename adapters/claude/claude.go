@@ -18,9 +18,8 @@
 //	env.json           environment variables; existing environment wins
 //	                   unless policy mode is on (the default)
 //	plugin/            --plugin-dir <dir>: org skills, agents, commands
-//	                   and hooks as a Claude Code plugin; the merged
-//	                   settings also allow Read(//<pack dir>/**), so
-//	                   the plugin's skills read pack files unprompted
+//	                   and hooks as a Claude Code plugin, plus a Read
+//	                   allow rule for the pack
 //	system-prompt.md   --append-system-prompt-file <file>
 //
 // A headless launch (BuildOptions.Headless) adds print-mode flags after
@@ -188,12 +187,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		labels = append(labels, "org policy (locked)")
 	}
 
-	// The org plugin's skills read reference files from the pack, which
-	// sits outside the project, so Claude Code would prompt for each read
-	// (and deny it in print mode). Loading the plugin already trusts the
-	// pack, so its files are readable without a prompt. The allow list
-	// unions across layers, so no user or project layer removes the
-	// rules, and any deny rule still wins over them.
+	// Let the org plugin's skills read pack files without a prompt.
 	pluginDir, hasPlugin := p.Subdir(DirName, DirPlugin)
 	var grant packGrant
 	if hasPlugin {
@@ -207,9 +201,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		org = true
 		settings := merged
 		if !hasDefaults && !hasPolicy {
-			// Only the read rules. Claude Code combines permission rules
-			// from every settings source itself, so the user and project
-			// layers stay live instead of being copied into this file.
+			// Claude Code unions permission rules across settings files.
 			settings = grant.settings()
 		}
 		path, err := a.writeMergedSettings(settings)
@@ -339,12 +331,8 @@ func toAny(list []string) []any {
 	return out
 }
 
-// packReadRules returns the Read allow rules that cover every file in the
-// pack directory dir. Claude Code allows a read through a symlink only
-// when both the path and its target match, so a pack reached through a
-// symlink gets a rule for its real location too. When dir is a git
-// checkout, its .git directory is denied: .git/config can hold a remote
-// URL with a token in it.
+// packReadRules allows reads under dir and its symlink target, and denies
+// dir/.git, whose config can hold credentials.
 func packReadRules(dir string) (packGrant, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -367,8 +355,7 @@ func packReadRules(dir string) (packGrant, error) {
 	return g, nil
 }
 
-// escapeGlob escapes the gitignore pattern characters in a path, so a
-// rule matches the path as spelled. Parentheses need no escaping.
+// escapeGlob escapes gitignore pattern characters.
 func escapeGlob(path string) string {
 	var b strings.Builder
 	for _, r := range path {
@@ -380,10 +367,8 @@ func escapeGlob(path string) string {
 	return b.String()
 }
 
-// rulePath writes an absolute path the way Claude Code matches it in
-// permission rules: with forward slashes, and on Windows with the drive
-// as a leading directory (C:\Users\me becomes /c/Users/me). A rule needs
-// one more leading slash to mean an absolute path.
+// rulePath returns abs in the POSIX form permission rules match
+// (C:\Users becomes /c/Users).
 func rulePath(abs string) string {
 	if len(abs) >= 2 && abs[1] == ':' {
 		if drive := unicode.ToLower(rune(abs[0])); 'a' <= drive && drive <= 'z' {

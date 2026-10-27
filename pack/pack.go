@@ -107,28 +107,14 @@ type GitOptions struct {
 	// subdirectory per URL and ref. Empty means
 	// <user cache dir>/coding-agent-wrapper/git.
 	CacheDir string
-	// Env is the environment git runs with; nil means os.Environ. Git
-	// always gets GIT_TERMINAL_PROMPT=0 on top of it.
+	// Env is the environment git runs with; nil means os.Environ.
 	Env []string
-	// ConnectTimeout bounds how long ssh waits to connect to the remote
-	// when cloning or refreshing; zero means DefaultConnectTimeout. It
-	// applies only when the wrapper sets the ssh command (see
-	// DefaultConnectTimeout).
+	// ConnectTimeout bounds ssh connects; zero means
+	// DefaultConnectTimeout. Ignored when the user sets an ssh command.
 	ConnectTimeout time.Duration
 }
 
-// DefaultConnectTimeout bounds ssh connections to a git pack's remote.
-//
-// When neither Env nor the process environment sets GIT_SSH_COMMAND or
-// GIT_SSH, and git config sets no core.sshCommand, clone and refresh run
-// ssh as
-//
-//	ssh -o BatchMode=yes -o ConnectTimeout=<seconds>
-//
-// so an unreachable remote fails after the timeout instead of the
-// system's TCP timeout, and ssh fails instead of waiting for input (an
-// unknown host key, a key passphrase not held by ssh-agent). A custom ssh
-// command is left alone. HTTPS remotes are not affected.
+// DefaultConnectTimeout is the ssh connect timeout for pack fetches.
 const DefaultConnectTimeout = 10 * time.Second
 
 // GitWith is Git with options. It accepts the same URL forms as Git,

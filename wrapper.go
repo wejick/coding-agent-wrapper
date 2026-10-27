@@ -92,10 +92,8 @@ type Options struct {
 	// Callers that check them separately, such as a doctor command, set
 	// it to avoid running every tool once per launch they prepare.
 	SkipTools bool
-	// ToolTimeout bounds each `<tool> --version` call of the launch's
-	// tools check; zero means tools.DefaultTimeout. Raise it for tools
-	// with a slow cold start, which would otherwise be reported as too
-	// old.
+	// ToolTimeout bounds each tool's `--version` call; zero means
+	// tools.DefaultTimeout.
 	ToolTimeout time.Duration
 	// Stdin, Stdout and Stderr are used on platforms without in-place exec;
 	// on UNIX the child inherits the process's streams. Run also writes

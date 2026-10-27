@@ -146,10 +146,8 @@ func HeadInfo(ctx context.Context, dir string) string {
 	return out
 }
 
-// remoteEnv is the environment for the git commands that contact the
-// remote: g.env plus the bounded, non-interactive ssh command described at
-// DefaultConnectTimeout, unless the user configured an ssh command of
-// their own. dir is where git config is read from.
+// remoteEnv is g.env plus a bounded, non-interactive ssh command, unless
+// the user configured their own.
 func (g gitSource) remoteEnv(ctx context.Context, dir string) []string {
 	env := g.env
 	if env == nil {
@@ -167,8 +165,7 @@ func (g gitSource) remoteEnv(ctx context.Context, dir string) []string {
 	return append(slices.Clip(env), fmt.Sprintf("GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=%d", secs))
 }
 
-// envValue returns the value of key in env, a KEY=VALUE list in which the
-// last entry wins, as it does for exec.
+// envValue returns the last value of key in env.
 func envValue(env []string, key string) string {
 	value := ""
 	for _, kv := range env {

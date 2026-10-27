@@ -50,35 +50,19 @@ returned launch then describes that fetch:
 label. `Options.Refresh` is ignored when `Fetched` is set, and the launch
 notes record that.
 
-### How long a refresh waits on an unreachable remote
+### Unreachable remotes
 
-For an SSH remote, the clone and the refresh run ssh as
-`ssh -o BatchMode=yes -o ConnectTimeout=10`:
+For an SSH remote, clone and refresh run
+`ssh -o BatchMode=yes -o ConnectTimeout=10`. An unreachable remote fails
+after 10 seconds and the launch uses the cached pack; ssh never waits for
+input, so an unknown host key fails the clone (accept it once with
+`ssh -T git@<host>`). A user's own `GIT_SSH_COMMAND`, `GIT_SSH` or
+`core.sshCommand` is used unchanged instead.
 
-- `ConnectTimeout` makes a remote that drops packets (no network, VPN
-  down) fail after 10 seconds, and the launch falls back to the cached
-  pack. Without it, ssh waits for the system's TCP connect timeout, often
-  more than a minute. A transfer that has connected is not limited, so a
-  first clone of a large pack on a slow link still completes.
-- `BatchMode` makes ssh fail instead of waiting for input. An unknown
-  host key or a key passphrase that ssh-agent does not hold becomes an
-  error such as `Host key verification failed`. Connect once with
-  `ssh -T git@<host>` to accept the host key.
-
-Options on the ssh command line take precedence over `~/.ssh/config`, so
-a `ConnectTimeout` or `BatchMode no` set there does not apply to pack
-fetches. Set `pack.GitOptions.ConnectTimeout` in `pack.GitWith` to change
-the 10 seconds. The wrapper only sets the ssh command when the user has none:
-`GIT_SSH_COMMAND` or `GIT_SSH` in the environment, or `core.sshCommand`
-in git config, is used unchanged and gets neither option.
-`pack.GitOptions.Env` sets the environment git runs with (default
-`os.Environ()`), so a caller can pass its own `GIT_SSH_COMMAND` for the
-pack without changing its process environment or the agent's.
-
-HTTPS remotes are not bounded this way; git has no connect timeout for
-them. Pass a `ctx` with a timeout to the refreshing fetch when that wait
-matters, or set `GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME`
-in `GitOptions.Env` to abort a stalled transfer.
+`pack.GitOptions.ConnectTimeout` changes the 10 seconds, and
+`pack.GitOptions.Env` sets the environment git runs with. HTTPS remotes
+have no connect timeout; bound them with a `ctx` deadline, or with
+`GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME` in `Env`.
 
 ## Listing the skills a pack provides
 
@@ -117,18 +101,12 @@ if skills := a.Skills(p); skills != nil {
 ```
 
 Each `pack.Skill` carries the `name` and `description` from the
-`SKILL.md` frontmatter and the path of the file. When the frontmatter sets
-no `name`, `Name` is the name of the directory holding `SKILL.md`, which
-is the name the agent gives that skill: `team/review/SKILL.md` without a
-`name` is listed as `review`. `Description` is empty when the frontmatter
-does not set it, so a pack's CI can check that every skill has one.
-
-`List` sorts the skills by `Name`, then by `Path`, across all the
-directories the adapter reads, so callers can show the list as it comes.
-Two skills with the same name keep a stable order. An agent whose pack
-directory has no skills returns an empty list. `wr doctor` prints the list
-under each agent's launch as `skill:` lines, and `wr doctor --json`
-includes it as `skills`.
+`SKILL.md` frontmatter and the path of the file. A skill without a
+frontmatter `name` is named after its directory, as the agent names it.
+`List` sorts by `Name`, then `Path`. An agent whose pack directory has no
+skills returns an empty list. `wr doctor` prints the list under each
+agent's launch as `skill:` lines, and `wr doctor --json` includes it as
+`skills`.
 
 ## Running an agent headless
 
@@ -189,28 +167,11 @@ field. For `/src/page` above, the arguments end in:
 | `Effort` | `--effort <effort>` |
 
 Nobody can answer a permission prompt in print mode, so a tool call that
-would prompt is denied. Two fields choose how much the run may do
-without asking:
-
-- `PermissionMode` passes a Claude Code permission mode through
-  unchanged, and Claude Code rejects a value it does not know. A task
-  that only edits files in the repository (writing a report, applying a
-  fix) asks for `acceptEdits` instead of full bypass. The note reads
-  `headless: permission mode acceptEdits (--permission-mode); ...` and
-  says that tool calls needing a permission the mode does not grant are
-  denied.
-- `Unattended` asks for `bypassPermissions`. A settings layer that sets
-  `permissions.disableBypassPermissionsMode` to `"disable"` keeps Claude
-  Code out of bypass mode, and the note says tool calls that need
-  permission will be denied. Managed settings can disable bypass mode
-  too, and the wrapper cannot read them, so otherwise the note says that
-  bypass mode was requested and may be disabled there. A run that needs
-  less than full bypass keeps working where bypass is disabled when it
-  uses `PermissionMode` instead.
-
-Setting both fields is an error from `Prepare`. An adapter whose agent
-has no permission mode returns an error for `PermissionMode` instead of
-ignoring it.
+would prompt is denied. `PermissionMode` passes a Claude Code permission
+mode through, so a task that only edits files can ask for `acceptEdits`
+instead of full bypass. `Unattended` asks for `bypassPermissions`, which
+settings (including managed settings the wrapper cannot read) may
+disable; the launch notes say so. Setting both is an error.
 
 The prompt is passed as a bare argument, so the adapter rejects a prompt
 that starts with `-`, and a permission mode that starts with `-`. Flags
@@ -238,10 +199,8 @@ The OpenCode adapter has no headless mapping yet and returns
    running 10 seconds later (off UNIX it is killed at once).
 5. It returns the child's exit code. A child that could not start or was
    killed by a signal returns `-1` and an error, which wraps `ctx.Err()`
-   when `ctx` was done. For a child killed by a signal, the error also
-   wraps the `*exec.ExitError`, so `errors.As(err, &exitErr)` tells it
-   apart from a start failure and `exitErr.ProcessState` names the signal
-   (an OOM kill reads `signal: killed`). A child that exits on its own
+   when `ctx` was done. For a signal, it also wraps the `*exec.ExitError`,
+   whose `ProcessState` names the signal. A child that exits on its own
    after `ctx` is done returns its exit code and `ctx.Err()`. A failing
    `Stdout` or `Stderr` writer returns the exit code with an error.
 6. A process the agent leaves behind (a background Bash task, an MCP

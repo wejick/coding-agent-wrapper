@@ -308,7 +308,6 @@ func TestBuildHeadlessPermissionMode(t *testing.T) {
 		t.Fatalf("expected the permission mode note, got %q", launch.Notes)
 	}
 
-	// Unattended no longer promises that prompts are skipped.
 	launch, err = a.Build(context.Background(), p, wrapper.BuildOptions{
 		Headless: &wrapper.Headless{Prompt: "fix it", Unattended: true},
 	})
@@ -640,10 +639,8 @@ func TestSkillsEmptyWithoutPlugin(t *testing.T) {
 	}
 }
 
-// pluginOnlyPack writes a pack holding only claude/plugin/ and, when
-// policy is set, claude/policy.json. The directory has no symlinks on its
-// path (macOS temp dirs sit under the /var symlink), so the pack gets one
-// read rule.
+// pluginOnlyPack writes a pack with claude/plugin/ and an optional
+// policy.json, at a symlink-free path.
 func pluginOnlyPack(t *testing.T, policy string) *pack.Pack {
 	t.Helper()
 	dir, err := filepath.EvalSymlinks(t.TempDir())
@@ -667,7 +664,6 @@ func pluginOnlyPack(t *testing.T, policy string) *pack.Pack {
 
 func TestBuildPluginMakesPackReadable(t *testing.T) {
 	fakeBinary(t)
-	// A user allowlist that replaces nothing: lists union.
 	homeWithUserSettings(t, `{"permissions":{"allow":["WebSearch"]}}`)
 	a := claude.New()
 	a.CacheDir = t.TempDir()
@@ -686,8 +682,6 @@ func TestBuildPluginMakesPackReadable(t *testing.T) {
 	if _, ok := argValue(t, launch.Args, "--settings"); !ok {
 		t.Fatalf("a plugin-only pack still needs a settings file, args = %q", launch.Args)
 	}
-	// The file holds only the rule: Claude Code combines it with the user
-	// and project allow lists itself, which stay in their own files.
 	merged := readMerged(t, launch)
 	if len(merged) != 1 {
 		t.Fatalf("a plugin-only pack should write only the read rule, got %v", merged)
@@ -703,9 +697,6 @@ func TestBuildPluginMakesPackReadable(t *testing.T) {
 		t.Fatalf("expected a note naming the rule, got %q", launch.Notes)
 	}
 
-	// With policy, the layers are merged as usual and the rule joins them.
-	// Policy deny rules sit next to the grant, and Claude Code evaluates
-	// deny before allow.
 	launch, err = a.Build(context.Background(), pluginOnlyPack(t, `{"permissions":{"deny":["Read(//**/secrets/**)"]}}`), wrapper.BuildOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -772,7 +763,6 @@ func TestRulePath(t *testing.T) {
 		`C:\Users\me\pack`:     "/c/Users/me/pack",
 		`d:\packs`:             "/d/packs",
 	} {
-		// filepath.ToSlash only converts backslashes on Windows.
 		if strings.Contains(in, `\`) && filepath.Separator != '\\' {
 			in = strings.ReplaceAll(in, `\`, "/")
 		}

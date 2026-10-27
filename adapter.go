@@ -46,18 +46,10 @@ type Headless struct {
 	Model string
 	// Effort is an optional effort level.
 	Effort string
-	// Unattended asks the agent to skip permission prompts with its
-	// bypass mode (Claude Code: bypassPermissions). Settings the wrapper
-	// cannot read, such as Claude Code's managed settings, may disable
-	// that mode, and tool calls that need permission are then denied.
+	// Unattended requests the agent's bypass permission mode.
 	Unattended bool
-	// PermissionMode is the agent's permission mode for the run, passed
-	// to the agent unchanged; the agent decides which values are valid
-	// (Claude Code: default, acceptEdits, plan, bypassPermissions, ...).
-	// Nobody can answer a prompt in a headless run, so a tool call that
-	// needs a permission the mode does not grant is denied. An adapter
-	// whose agent has no permission mode returns an error. Setting both
-	// PermissionMode and Unattended is an error.
+	// PermissionMode is passed to the agent as its permission mode.
+	// Mutually exclusive with Unattended.
 	PermissionMode string
 }
 

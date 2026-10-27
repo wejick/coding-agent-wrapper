@@ -38,12 +38,11 @@ var killGrace = 10 * time.Second
 // running 10 seconds later (off UNIX it is killed at once).
 //
 // RunChild returns the child's exit code. It returns -1 and an error when
-// the child could not start or was killed by a signal. For a child killed
-// by a signal the error wraps the *exec.ExitError, whose ProcessState
-// names the signal, so errors.As tells it apart from a start failure; it
-// also wraps ctx.Err() when ctx was done. When the child exits on its own
-// after ctx is done, it returns the exit code and ctx.Err(). An error from
-// the Stdout or Stderr writer is returned with the exit code.
+// the child could not start or was killed by a signal; for a signal the
+// error wraps the *exec.ExitError, and ctx.Err() when ctx was done. When
+// the child exits on its own after ctx is done, it returns the exit code
+// and ctx.Err(). An error from the Stdout or Stderr writer is returned
+// with the exit code.
 //
 // A process the child leaves behind (a background shell task, an MCP
 // server) can keep the child's stdout or stderr open after the child
@@ -86,8 +85,6 @@ func (l *Launch) RunChild(ctx context.Context, o RunOptions) (int, error) {
 	}
 	code := cmd.ProcessState.ExitCode()
 	if code < 0 {
-		// err is the *exec.ExitError; its message is the ProcessState
-		// ("signal: killed"), and wrapping it lets callers read the signal.
 		err = fmt.Errorf("wrapper: %s: %w", l.Binary, err)
 		if ctx.Err() != nil {
 			err = fmt.Errorf("%w: %w", err, ctx.Err())

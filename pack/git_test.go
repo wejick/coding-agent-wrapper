@@ -407,10 +407,9 @@ func TestGitRefreshOfDeletedBranchKeepsCacheWithNote(t *testing.T) {
 	}
 }
 
-// fakeSSH puts executables named ssh and myssh on PATH that append their
-// name and arguments to a log and fail like an unreachable host. It
-// returns an environment for GitOptions.Env with no ssh command and no
-// user or system git config, and the log's path.
+// fakeSSH returns an env whose PATH has failing ssh and myssh commands
+// that log their arguments, without ssh or git config overrides, and the
+// log's path.
 func fakeSSH(t *testing.T) ([]string, string) {
 	t.Helper()
 	bin := t.TempDir()
