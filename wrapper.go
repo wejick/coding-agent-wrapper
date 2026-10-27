@@ -92,6 +92,11 @@ type Options struct {
 	// Callers that check them separately, such as a doctor command, set
 	// it to avoid running every tool once per launch they prepare.
 	SkipTools bool
+	// ToolTimeout bounds each `<tool> --version` call of the launch's
+	// tools check; zero means tools.DefaultTimeout. Raise it for tools
+	// with a slow cold start, which would otherwise be reported as too
+	// old.
+	ToolTimeout time.Duration
 	// Stdin, Stdout and Stderr are used on platforms without in-place exec;
 	// on UNIX the child inherits the process's streams. Run also writes
 	// the launch warnings to Stderr (os.Stderr when nil).
@@ -197,7 +202,7 @@ func toolWarnings(ctx context.Context, dir string, opts Options) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("required tools were not checked: %v", err)}
 	}
-	statuses := tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env})
+	statuses := tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env, Timeout: opts.ToolTimeout})
 	var refused map[string]error
 	if opts.SetupCommand != "" {
 		refused = refusedInstalls(ctx, statuses, opts.Env)

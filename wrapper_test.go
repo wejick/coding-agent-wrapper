@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	wrapper "github.com/wejick/coding-agent-wrapper"
 	"github.com/wejick/coding-agent-wrapper/adapters/claude"
@@ -232,6 +233,39 @@ func TestPrepareWarnsAboutRequiredTools(t *testing.T) {
 	})
 	if err != nil || len(launch.Warnings) != 0 {
 		t.Fatalf("SkipTools: warnings = %v, err = %v", launch.Warnings, err)
+	}
+}
+
+func TestPrepareToolTimeout(t *testing.T) {
+	registerAdapter(t)
+	fakePath(t)
+	bin := filepath.SplitList(os.Getenv("PATH"))[0]
+	// A tool with a slow cold start.
+	if err := os.WriteFile(filepath.Join(bin, "slow"), []byte("#!/bin/sh\nsleep 0.5\necho 1.10.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(filepath.ListSeparator)+"/bin"+string(filepath.ListSeparator)+"/usr/bin")
+	dir := toolsPack(t, `{"slow": {"min_version": "1.10.0"}}`)
+
+	launch, err := wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:       "claude",
+		Pack:        pack.Local(dir),
+		ToolTimeout: 100 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(launch.Warnings) != 1 || !strings.HasPrefix(launch.Warnings[0], "slow ") {
+		t.Fatalf("a check that runs out of time should warn, warnings = %q", launch.Warnings)
+	}
+
+	launch, err = wrapper.Prepare(context.Background(), wrapper.Options{
+		Agent:       "claude",
+		Pack:        pack.Local(dir),
+		ToolTimeout: 5 * time.Second,
+	})
+	if err != nil || len(launch.Warnings) != 0 {
+		t.Fatalf("a longer ToolTimeout should let the check finish: warnings = %q, err = %v", launch.Warnings, err)
 	}
 }
 
