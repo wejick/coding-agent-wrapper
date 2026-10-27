@@ -18,7 +18,9 @@
 //	env.json           environment variables; existing environment wins
 //	                   unless policy mode is on (the default)
 //	plugin/            --plugin-dir <dir>: org skills, agents, commands
-//	                   and hooks as a Claude Code plugin
+//	                   and hooks as a Claude Code plugin; the merged
+//	                   settings also allow Read(//<pack dir>/**), so
+//	                   the plugin's skills read pack files unprompted
 //	system-prompt.md   --append-system-prompt-file <file>
 //
 // A headless launch (BuildOptions.Headless) adds print-mode flags after
@@ -40,6 +42,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	wrapper "github.com/wejick/coding-agent-wrapper"
 	"github.com/wejick/coding-agent-wrapper/adapters/internal/mergedfile"
@@ -185,7 +188,26 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		labels = append(labels, "org policy (locked)")
 	}
 
-	if hasDefaults || hasPolicy {
+	// The org plugin's skills read reference files from the pack, which
+	// sits outside the project, so Claude Code would prompt for each read
+	// (and deny it in print mode). Loading the plugin already trusts the
+	// pack, so its files are readable without a prompt. The allow list
+	// unions across layers, so no user or project layer removes the
+	// rules, and any deny rule still wins over them.
+	_, hasPlugin := p.Subdir(DirName, DirPlugin)
+	var readRules []string
+	if hasPlugin {
+		if readRules, err = packReadRules(p.Dir); err != nil {
+			return nil, err
+		}
+		allow := make([]any, len(readRules))
+		for i, r := range readRules {
+			allow[i] = r
+		}
+		merged = pack.MergeJSON(merged, map[string]any{"permissions": map[string]any{"allow": allow}}, rules)
+	}
+
+	if hasDefaults || hasPolicy || hasPlugin {
 		org = true
 		path, err := a.writeMergedSettings(merged)
 		if err != nil {
@@ -198,6 +220,9 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		}
 		if hasPolicy {
 			launch.Notes = append(launch.Notes, fmt.Sprintf("policy %s applied over every layer (user and project settings cannot override it)", FilePolicy))
+		}
+		if hasPlugin {
+			launch.Notes = append(launch.Notes, fmt.Sprintf("pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets %s (read only; deny rules still win)", strings.Join(readRules, ", ")))
 		}
 	}
 
@@ -283,6 +308,39 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 // Skills lists the org plugin's skills/ directory.
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
+}
+
+// packReadRules returns the Read allow rules that cover every file in the
+// pack directory dir. Claude Code allows a read through a symlink only
+// when both the path and its target match, so a pack reached through a
+// symlink gets a rule for its real location too.
+func packReadRules(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	dirs := []string{abs}
+	if real, err := filepath.EvalSymlinks(abs); err == nil && real != abs {
+		dirs = append(dirs, real)
+	}
+	var rules []string
+	for _, d := range dirs {
+		rules = append(rules, "Read(/"+strings.TrimSuffix(rulePath(d), "/")+"/**)")
+	}
+	return rules, nil
+}
+
+// rulePath writes an absolute path the way Claude Code matches it in
+// permission rules: with forward slashes, and on Windows with the drive
+// as a leading directory (C:\Users\me becomes /c/Users/me). A rule needs
+// one more leading slash to mean an absolute path.
+func rulePath(abs string) string {
+	if len(abs) >= 2 && abs[1] == ':' {
+		if drive := unicode.ToLower(rune(abs[0])); 'a' <= drive && drive <= 'z' {
+			abs = "/" + string(drive) + abs[2:]
+		}
+	}
+	return filepath.ToSlash(abs)
 }
 
 // bypassMode is the permission mode Headless.Unattended asks for.

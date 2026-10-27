@@ -199,6 +199,38 @@ plugin. The user's own installed plugins, skills and commands are untouched
 and keep working. Name your plugin after the org (`acme-defaults`) so both
 can coexist.
 
+A skill in the plugin often reads other files from the pack, such as a
+checklist or a reference doc. The pack lives in the wrapper's cache, outside
+the project, so Claude Code would ask before each read, and in print mode
+(a headless launch) nobody can answer, so the read would be denied. When
+the pack has `claude/plugin/`, the wrapper therefore adds one rule to
+`permissions.allow` in the merged settings file:
+
+```
+Read(//home/me/.cache/coding-agent-wrapper/git/3f2a.../**)
+```
+
+- The rule covers the whole pack directory, because skills read files
+  that sit outside the plugin directory too. It grants reads only: no
+  edits, and nothing in the project or elsewhere.
+- It is added even when the pack has no `settings.json` or `policy.json`;
+  the wrapper then writes a settings file holding the user and project
+  layers plus the rule.
+- `permissions.allow` unions across layers, so a user or project allow
+  list cannot remove the rule. Claude Code evaluates deny rules before
+  allow rules, so a deny rule in `policy.json` or managed settings still
+  blocks a read.
+- It does not depend on bypass mode, so it keeps working where managed
+  settings disable bypass.
+- On Windows, Claude Code matches paths in POSIX form, so the rule for
+  `C:\Users\me\AppData\Local\...` is `Read(//c/Users/me/AppData/Local/...)`.
+  When the pack path goes through a symlink, a second rule covers the real
+  location, because Claude Code only allows a read when both the path and
+  its target match.
+
+The launch notes name the rule (`pack files are readable without a
+prompt ...`), so `wr doctor` shows it.
+
 ## OpenCode
 
 OpenCode merges named config sources, later sources win per key: remote
