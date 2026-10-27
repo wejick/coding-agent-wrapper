@@ -213,7 +213,9 @@ token in the remote URL unreadable. Allow lists union, so user and
 project settings cannot remove the grant, and deny rules in `policy.json`
 or managed settings still win over it. A pack with only a plugin gets a
 settings file holding just these rules. `wr doctor` lists them in the
-launch notes.
+launch notes. An embedding binary that does not want the grant sets
+`SkipPackRead` on the Claude adapter; the plugin still loads, and its
+skills prompt before reading pack files.
 
 ## OpenCode
 

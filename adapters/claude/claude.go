@@ -80,6 +80,9 @@ type Adapter struct {
 	ProjectDir string
 	// CacheDir overrides where merged settings are written (for tests).
 	CacheDir string
+	// SkipPackRead leaves out the Read allow rule that lets the org
+	// plugin's skills read pack files without a prompt.
+	SkipPackRead bool
 }
 
 // New returns a Claude Code adapter with defaults.
@@ -189,15 +192,16 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 
 	// Let the org plugin's skills read pack files without a prompt.
 	pluginDir, hasPlugin := p.Subdir(DirName, DirPlugin)
+	grantRead := hasPlugin && !a.SkipPackRead
 	var grant packGrant
-	if hasPlugin {
+	if grantRead {
 		if grant, err = packReadRules(p.Dir); err != nil {
 			return nil, err
 		}
 		merged = pack.MergeJSON(merged, grant.settings(), rules)
 	}
 
-	if hasDefaults || hasPolicy || hasPlugin {
+	if hasDefaults || hasPolicy || grantRead {
 		org = true
 		settings := merged
 		if !hasDefaults && !hasPolicy {
@@ -216,7 +220,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		if hasPolicy {
 			launch.Notes = append(launch.Notes, fmt.Sprintf("policy %s applied over every layer (user and project settings cannot override it)", FilePolicy))
 		}
-		if hasPlugin {
+		if grantRead {
 			launch.Notes = append(launch.Notes, fmt.Sprintf("pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets %s (read only; deny rules still win)", strings.Join(grant.allow, ", ")))
 			if len(grant.deny) > 0 {
 				launch.Notes = append(launch.Notes, fmt.Sprintf("the pack's git metadata stays unreadable without a prompt: permissions.deny gets %s", strings.Join(grant.deny, ", ")))
@@ -241,6 +245,9 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		org = true
 		args = append(args, "--plugin-dir", pluginDir)
 		launch.Notes = append(launch.Notes, fmt.Sprintf("org plugin loaded from %s", pluginDir))
+		if a.SkipPackRead {
+			launch.Notes = append(launch.Notes, "pack read access not granted (SkipPackRead); the org plugin's skills prompt before reading pack files")
+		}
 	}
 
 	// 4. System prompt append.

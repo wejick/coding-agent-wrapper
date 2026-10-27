@@ -804,3 +804,33 @@ func TestBuildPackReadRuleDeniesGitAndEscapesGlobs(t *testing.T) {
 		t.Fatalf("the checkout's .git should stay denied, deny = %v", deny)
 	}
 }
+
+func TestBuildSkipPackRead(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	a.SkipPackRead = true
+
+	launch, err := a.Build(context.Background(), pluginOnlyPack(t, ""), wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := argValue(t, launch.Args, "--settings"); ok {
+		t.Fatalf("a plugin-only pack without the grant needs no settings file, args = %q", launch.Args)
+	}
+	if _, ok := argValue(t, launch.Args, "--plugin-dir"); !ok {
+		t.Fatalf("the plugin should still load, args = %q", launch.Args)
+	}
+	if !slices.Contains(launch.Notes, "pack read access not granted (SkipPackRead); the org plugin's skills prompt before reading pack files") {
+		t.Fatalf("expected a note about the skipped grant, got %q", launch.Notes)
+	}
+
+	launch, err = a.Build(context.Background(), pluginOnlyPack(t, `{"permissions":{"deny":["Read(./.env)"]}}`), wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readMerged(t, launch)["permissions"].(map[string]any)["allow"]; ok {
+		t.Fatal("SkipPackRead should leave out the allow rule")
+	}
+}
