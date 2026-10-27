@@ -1,14 +1,19 @@
 package pack
 
 import (
+	"cmp"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 // Skill is read from a SKILL.md frontmatter.
 type Skill struct {
+	// Name is the frontmatter name, or the name of the directory holding
+	// SKILL.md when the frontmatter sets none, which is how the agents
+	// name such a skill.
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Path        string `json:"path"`
@@ -17,6 +22,8 @@ type Skill struct {
 // SkillDirs implements wrapper.Skills over directories of SKILL.md files.
 type SkillDirs []string
 
+// List returns the skills in every directory, sorted by Name and then by
+// Path, so skills that share a name keep a stable order.
 func (d SkillDirs) List() ([]Skill, error) {
 	var skills []Skill
 	for _, dir := range d {
@@ -26,6 +33,9 @@ func (d SkillDirs) List() ([]Skill, error) {
 		}
 		skills = append(skills, found...)
 	}
+	slices.SortFunc(skills, func(a, b Skill) int {
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.Path, b.Path))
+	})
 	return skills, nil
 }
 
@@ -51,7 +61,11 @@ func readSkills(dir string) ([]Skill, error) {
 		path := filepath.Join(dir, "SKILL.md")
 		if data, err := os.ReadFile(path); err == nil {
 			fm := frontmatter(string(data))
-			skills = append(skills, Skill{Name: fm["name"], Description: fm["description"], Path: path})
+			name := fm["name"]
+			if name == "" {
+				name = filepath.Base(dir)
+			}
+			skills = append(skills, Skill{Name: name, Description: fm["description"], Path: path})
 			return nil
 		}
 		entries, err := os.ReadDir(dir)

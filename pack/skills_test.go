@@ -48,7 +48,7 @@ func TestReadSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := readSkills(dir)
+	got, err := SkillDirs{dir}.List()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,10 +57,42 @@ func TestReadSkills(t *testing.T) {
 		{Name: "continued", Description: "Starts here and continues.", Path: filepath.Join(dir, "continued", "SKILL.md")},
 		{Name: "folded", Description: "First line second line.", Path: filepath.Join(dir, "folded", "SKILL.md")},
 		{Name: "linked", Description: "Shared.", Path: filepath.Join(dir, "linked", "SKILL.md")},
-		{Path: filepath.Join(dir, "nometa", "SKILL.md")},
+		{Name: "nested", Description: "Grouped under team/.", Path: filepath.Join(dir, "team", "nested", "SKILL.md")},
+		{Name: "nometa", Path: filepath.Join(dir, "nometa", "SKILL.md")},
 		{Name: "plain", Description: "Plain description.", Path: filepath.Join(dir, "plain", "SKILL.md")},
 		{Name: "quoted", Description: "It's quoted: with a colon", Path: filepath.Join(dir, "quoted", "SKILL.md")},
-		{Name: "nested", Description: "Grouped under team/.", Path: filepath.Join(dir, "team", "nested", "SKILL.md")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("skills =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestSkillDirsListSortsAcrossDirs(t *testing.T) {
+	root := t.TempDir()
+	write := func(path, content string) {
+		t.Helper()
+		path = filepath.Join(root, path, "SKILL.md")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("b/zeta", "---\nname: zeta\n---\n")
+	write("b/alpha", "---\nname: shared\n---\n")
+	write("a/review", "---\ndescription: No name, named after its directory.\n---\n")
+	write("a/x", "---\nname: shared\n---\n")
+
+	got, err := SkillDirs{filepath.Join(root, "b"), filepath.Join(root, "a")}.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Skill{
+		{Name: "review", Description: "No name, named after its directory.", Path: filepath.Join(root, "a", "review", "SKILL.md")},
+		{Name: "shared", Path: filepath.Join(root, "a", "x", "SKILL.md")},
+		{Name: "shared", Path: filepath.Join(root, "b", "alpha", "SKILL.md")},
+		{Name: "zeta", Path: filepath.Join(root, "b", "zeta", "SKILL.md")},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("skills =\n%+v\nwant\n%+v", got, want)
