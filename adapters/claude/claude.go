@@ -24,9 +24,10 @@
 // A headless launch (BuildOptions.Headless) adds print-mode flags after
 // the pack flags and before the user's arguments:
 //
-//	Prompt      -p <prompt>
-//	Unattended  --permission-mode bypassPermissions
-//	Model       --model <model>
+//	Prompt          -p <prompt>
+//	Unattended      --permission-mode bypassPermissions
+//	PermissionMode  --permission-mode <mode>
+//	Model           --model <model>
 //	Effort      --effort <effort>
 //
 // See docs/config-layers.md for the layering model in depth.
@@ -102,9 +103,17 @@ func (a *Adapter) binaryName() string {
 // above them unless o.SkipPolicy).
 func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOptions) (*wrapper.Launch, error) {
 	// The headless prompt is a bare argument, so one starting with "-"
-	// would be parsed as a flag.
-	if h := o.Headless; h != nil && (h.Prompt == "" || strings.HasPrefix(h.Prompt, "-")) {
-		return nil, fmt.Errorf("%s: headless prompt %q must be non-empty and must not start with \"-\"", DirName, h.Prompt)
+	// would be parsed as a flag; so would a permission mode.
+	if h := o.Headless; h != nil {
+		if h.Prompt == "" || strings.HasPrefix(h.Prompt, "-") {
+			return nil, fmt.Errorf("%s: headless prompt %q must be non-empty and must not start with \"-\"", DirName, h.Prompt)
+		}
+		if strings.HasPrefix(h.PermissionMode, "-") {
+			return nil, fmt.Errorf("%s: headless permission mode %q must not start with \"-\"", DirName, h.PermissionMode)
+		}
+		if h.Unattended && h.PermissionMode != "" {
+			return nil, fmt.Errorf("%s: headless launch sets both Unattended and PermissionMode %q; set one", DirName, h.PermissionMode)
+		}
 	}
 	launch := &wrapper.Launch{Notes: []string{}, Files: []string{}}
 	binary, err := a.Locate()
@@ -237,12 +246,19 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	if h := o.Headless; h != nil {
 		args = append(args, "-p", h.Prompt)
 		launch.Notes = append(launch.Notes, fmt.Sprintf("headless: runs the prompt %q and exits (-p)", h.Prompt))
+		mode := h.PermissionMode
 		if h.Unattended {
-			args = append(args, "--permission-mode", "bypassPermissions")
-			if bypassDisabled(merged) {
-				launch.Notes = append(launch.Notes, "headless: unattended requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so tools that need permission will be denied")
-			} else {
-				launch.Notes = append(launch.Notes, "headless: unattended, permission prompts are skipped (--permission-mode bypassPermissions)")
+			mode = bypassMode
+		}
+		if mode != "" {
+			args = append(args, "--permission-mode", mode)
+			switch {
+			case mode == bypassMode && bypassDisabled(merged):
+				launch.Notes = append(launch.Notes, "headless: bypass mode requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so tools that need permission will be denied")
+			case mode == bypassMode:
+				launch.Notes = append(launch.Notes, "headless: bypass mode requested (--permission-mode bypassPermissions); managed settings, which the wrapper cannot read, may disable it, and tool calls that need permission are then denied")
+			default:
+				launch.Notes = append(launch.Notes, fmt.Sprintf("headless: permission mode %s (--permission-mode); nobody can answer a prompt, so tool calls that need a permission this mode does not grant are denied", mode))
 			}
 		}
 		if h.Model != "" {
@@ -268,6 +284,9 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
 }
+
+// bypassMode is the permission mode Headless.Unattended asks for.
+const bypassMode = "bypassPermissions"
 
 // bypassDisabled reports whether the merged settings turn off
 // bypassPermissions mode.

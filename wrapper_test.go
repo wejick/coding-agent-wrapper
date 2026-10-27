@@ -335,6 +335,7 @@ func TestPrepareRejectsBadHeadlessOrDir(t *testing.T) {
 	}
 	for name, opts := range map[string]wrapper.Options{
 		"no prompt":   {Headless: &wrapper.Headless{Model: "sonnet"}},
+		"two modes":   {Headless: &wrapper.Headless{Prompt: "task", Unattended: true, PermissionMode: "acceptEdits"}},
 		"missing dir": {Dir: filepath.Join(t.TempDir(), "nope")},
 		"file as dir": {Dir: file},
 	} {

@@ -285,6 +285,52 @@ func TestBuildHeadless(t *testing.T) {
 	}
 }
 
+func TestBuildHeadlessPermissionMode(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	a.ProjectDir = t.TempDir()
+	p := testPack(t)
+
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{
+		Headless: &wrapper.Headless{Prompt: "fix it", PermissionMode: "acceptEdits"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "fix it", "--permission-mode", "acceptEdits"}
+	if got := launch.Args[len(launch.Args)-len(want):]; !slices.Equal(got, want) {
+		t.Fatalf("args end = %q, want %q", got, want)
+	}
+	note := "headless: permission mode acceptEdits (--permission-mode); nobody can answer a prompt, so tool calls that need a permission this mode does not grant are denied"
+	if !slices.Contains(launch.Notes, note) {
+		t.Fatalf("expected the permission mode note, got %q", launch.Notes)
+	}
+
+	// Unattended no longer promises that prompts are skipped.
+	launch, err = a.Build(context.Background(), p, wrapper.BuildOptions{
+		Headless: &wrapper.Headless{Prompt: "fix it", Unattended: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(launch.Notes, func(n string) bool {
+		return strings.HasPrefix(n, "headless: bypass mode requested") && strings.Contains(n, "managed settings, which the wrapper cannot read, may disable it")
+	}) {
+		t.Fatalf("expected the bypass note to name managed settings, got %q", launch.Notes)
+	}
+
+	for name, h := range map[string]*wrapper.Headless{
+		"both":       {Prompt: "fix it", Unattended: true, PermissionMode: "acceptEdits"},
+		"flag shape": {Prompt: "fix it", PermissionMode: "--dangerously-skip-permissions"},
+	} {
+		if _, err := a.Build(context.Background(), p, wrapper.BuildOptions{Headless: h}); err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
+	}
+}
+
 func TestBuildHeadlessNotesDisabledBypass(t *testing.T) {
 	fakeBinary(t)
 	t.Setenv("HOME", t.TempDir())

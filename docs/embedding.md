@@ -182,18 +182,39 @@ field. For `/src/page` above, the arguments end in:
 | --- | --- |
 | `Prompt` (required) | `-p <prompt>` |
 | `Unattended` | `--permission-mode bypassPermissions` |
+| `PermissionMode` | `--permission-mode <mode>` |
 | `Model` | `--model <model>` |
 | `Effort` | `--effort <effort>` |
 
-A settings layer that sets `permissions.disableBypassPermissionsMode` to
-`"disable"` still applies and keeps Claude Code out of bypass mode, so
-`Unattended` has no effect under it. Nobody can answer a permission
-prompt in print mode, so tool calls that need permission are denied; the
-unattended note says so. The prompt is passed as a bare argument, so the
-adapter rejects a prompt that starts with `-`. Flags such as
-`--output-format json` go in `Options.Args`. Keep `Options.Args` to flags
-in a headless launch: a positional argument there lands after the prompt
-and Claude Code reads it as more prompt text.
+Nobody can answer a permission prompt in print mode, so a tool call that
+would prompt is denied. Two fields choose how much the run may do
+without asking:
+
+- `PermissionMode` passes a Claude Code permission mode through
+  unchanged, and Claude Code rejects a value it does not know. A task
+  that only edits files in the repository (writing a report, applying a
+  fix) asks for `acceptEdits` instead of full bypass. The note reads
+  `headless: permission mode acceptEdits (--permission-mode); ...` and
+  says that tool calls needing a permission the mode does not grant are
+  denied.
+- `Unattended` asks for `bypassPermissions`. A settings layer that sets
+  `permissions.disableBypassPermissionsMode` to `"disable"` keeps Claude
+  Code out of bypass mode, and the note says tool calls that need
+  permission will be denied. Managed settings can disable bypass mode
+  too, and the wrapper cannot read them, so otherwise the note says that
+  bypass mode was requested and may be disabled there. A run that needs
+  less than full bypass keeps working where bypass is disabled when it
+  uses `PermissionMode` instead.
+
+Setting both fields is an error from `Prepare`. An adapter whose agent
+has no permission mode returns an error for `PermissionMode` instead of
+ignoring it.
+
+The prompt is passed as a bare argument, so the adapter rejects a prompt
+that starts with `-`, and a permission mode that starts with `-`. Flags
+such as `--output-format json` go in `Options.Args`. Keep `Options.Args`
+to flags in a headless launch: a positional argument there lands after
+the prompt and Claude Code reads it as more prompt text.
 The OpenCode adapter has no headless mapping yet and returns
 `wrapper.ErrHeadlessUnsupported`; check for it with `errors.Is`.
 

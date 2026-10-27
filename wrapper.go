@@ -143,8 +143,13 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	if opts.Pack == nil {
 		return nil, errors.New("wrapper: no defaults pack configured")
 	}
-	if opts.Headless != nil && opts.Headless.Prompt == "" {
-		return nil, errors.New("wrapper: headless launch needs a prompt")
+	if h := opts.Headless; h != nil {
+		if h.Prompt == "" {
+			return nil, errors.New("wrapper: headless launch needs a prompt")
+		}
+		if h.Unattended && h.PermissionMode != "" {
+			return nil, fmt.Errorf("wrapper: headless launch sets both Unattended and PermissionMode %q; set one", h.PermissionMode)
+		}
 	}
 	dir := opts.Dir
 	if dir != "" {
