@@ -181,9 +181,12 @@ The OpenCode adapter has no headless mapping yet and returns
    running 10 seconds later (off UNIX it is killed at once).
 5. It returns the child's exit code. A child that could not start or was
    killed by a signal returns `-1` and an error, which wraps `ctx.Err()`
-   when `ctx` was done. A child that exits on its own after `ctx` is done
-   returns its exit code and `ctx.Err()`. A failing `Stdout` or `Stderr`
-   writer returns the exit code with an error.
+   when `ctx` was done. For a child killed by a signal, the error also
+   wraps the `*exec.ExitError`, so `errors.As(err, &exitErr)` tells it
+   apart from a start failure and `exitErr.ProcessState` names the signal
+   (an OOM kill reads `signal: killed`). A child that exits on its own
+   after `ctx` is done returns its exit code and `ctx.Err()`. A failing
+   `Stdout` or `Stderr` writer returns the exit code with an error.
 6. A process the agent leaves behind (a background Bash task, an MCP
    server) can keep the agent's stdout or stderr open after the agent
    exits. `RunChild` stops reading that output 10 seconds after the
