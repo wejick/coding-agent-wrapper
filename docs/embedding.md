@@ -54,15 +54,21 @@ notes record that.
 
 For an SSH remote, clone and refresh run
 `ssh -o BatchMode=yes -o ConnectTimeout=10`. An unreachable remote fails
-after 10 seconds and the launch uses the cached pack; ssh never waits for
-input, so an unknown host key fails the clone (accept it once with
-`ssh -T git@<host>`). A user's own `GIT_SSH_COMMAND`, `GIT_SSH` or
-`core.sshCommand` is used unchanged instead.
+after 10 seconds and the launch uses the cached pack, and ssh fails
+instead of waiting for input such as a new host key. A user's own
+`GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` is used unchanged
+instead.
 
-`pack.GitOptions.ConnectTimeout` changes the 10 seconds, and
-`pack.GitOptions.Env` sets the environment git runs with. HTTPS remotes
-have no connect timeout; bound them with a `ctx` deadline, or with
-`GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME` in `Env`.
+`pack.GitOptions` changes this per source:
+
+- `ConnectTimeout` replaces the 10 seconds.
+- `Interactive` drops `BatchMode`, so ssh can ask the user to accept a
+  host key or enter a passphrase. `wr` sets it when stdin is a terminal.
+- `Env` sets the environment git runs with.
+
+HTTPS remotes have no connect timeout; bound them with a `ctx` deadline,
+or with `GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME` in
+`Env`.
 
 ## Listing the skills a pack provides
 
