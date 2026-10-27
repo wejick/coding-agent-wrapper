@@ -194,35 +194,41 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	// pack, so its files are readable without a prompt. The allow list
 	// unions across layers, so no user or project layer removes the
 	// rules, and any deny rule still wins over them.
-	_, hasPlugin := p.Subdir(DirName, DirPlugin)
-	var readRules []string
+	pluginDir, hasPlugin := p.Subdir(DirName, DirPlugin)
+	var grant packGrant
 	if hasPlugin {
-		if readRules, err = packReadRules(p.Dir); err != nil {
+		if grant, err = packReadRules(p.Dir); err != nil {
 			return nil, err
 		}
-		allow := make([]any, len(readRules))
-		for i, r := range readRules {
-			allow[i] = r
-		}
-		merged = pack.MergeJSON(merged, map[string]any{"permissions": map[string]any{"allow": allow}}, rules)
+		merged = pack.MergeJSON(merged, grant.settings(), rules)
 	}
 
 	if hasDefaults || hasPolicy || hasPlugin {
 		org = true
-		path, err := a.writeMergedSettings(merged)
+		settings := merged
+		if !hasDefaults && !hasPolicy {
+			// Only the read rules. Claude Code combines permission rules
+			// from every settings source itself, so the user and project
+			// layers stay live instead of being copied into this file.
+			settings = grant.settings()
+		}
+		path, err := a.writeMergedSettings(settings)
 		if err != nil {
 			return nil, err
 		}
 		launch.Files = append(launch.Files, path)
 		args = append(args, "--settings", path)
-		if len(labels) > 1 {
+		if len(labels) > 1 && (hasDefaults || hasPolicy) {
 			launch.Notes = append(launch.Notes, "settings layers (low → high): "+strings.Join(labels, " < "))
 		}
 		if hasPolicy {
 			launch.Notes = append(launch.Notes, fmt.Sprintf("policy %s applied over every layer (user and project settings cannot override it)", FilePolicy))
 		}
 		if hasPlugin {
-			launch.Notes = append(launch.Notes, fmt.Sprintf("pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets %s (read only; deny rules still win)", strings.Join(readRules, ", ")))
+			launch.Notes = append(launch.Notes, fmt.Sprintf("pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets %s (read only; deny rules still win)", strings.Join(grant.allow, ", ")))
+			if len(grant.deny) > 0 {
+				launch.Notes = append(launch.Notes, fmt.Sprintf("the pack's git metadata stays unreadable without a prompt: permissions.deny gets %s", strings.Join(grant.deny, ", ")))
+			}
 		}
 	}
 
@@ -239,7 +245,7 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	}
 
 	// 3. Org plugin: skills, agents, commands, hooks.
-	if pluginDir, ok := p.Subdir(DirName, DirPlugin); ok {
+	if hasPlugin {
 		org = true
 		args = append(args, "--plugin-dir", pluginDir)
 		launch.Notes = append(launch.Notes, fmt.Sprintf("org plugin loaded from %s", pluginDir))
@@ -310,24 +316,68 @@ func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
 }
 
+// packGrant holds the permission rules that make a pack readable.
+type packGrant struct {
+	allow []string
+	deny  []string
+}
+
+// settings returns the grant as a settings document.
+func (g packGrant) settings() map[string]any {
+	perms := map[string]any{"allow": toAny(g.allow)}
+	if len(g.deny) > 0 {
+		perms["deny"] = toAny(g.deny)
+	}
+	return map[string]any{"permissions": perms}
+}
+
+func toAny(list []string) []any {
+	out := make([]any, len(list))
+	for i, s := range list {
+		out[i] = s
+	}
+	return out
+}
+
 // packReadRules returns the Read allow rules that cover every file in the
 // pack directory dir. Claude Code allows a read through a symlink only
 // when both the path and its target match, so a pack reached through a
-// symlink gets a rule for its real location too.
-func packReadRules(dir string) ([]string, error) {
+// symlink gets a rule for its real location too. When dir is a git
+// checkout, its .git directory is denied: .git/config can hold a remote
+// URL with a token in it.
+func packReadRules(dir string) (packGrant, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, err
+		return packGrant{}, err
 	}
 	dirs := []string{abs}
 	if real, err := filepath.EvalSymlinks(abs); err == nil && real != abs {
 		dirs = append(dirs, real)
 	}
-	var rules []string
+	_, err = os.Stat(filepath.Join(abs, ".git"))
+	hasGit := err == nil
+	var g packGrant
 	for _, d := range dirs {
-		rules = append(rules, "Read(/"+strings.TrimSuffix(rulePath(d), "/")+"/**)")
+		root := "Read(/" + strings.TrimSuffix(escapeGlob(rulePath(d)), "/")
+		g.allow = append(g.allow, root+"/**)")
+		if hasGit {
+			g.deny = append(g.deny, root+"/.git/**)")
+		}
 	}
-	return rules, nil
+	return g, nil
+}
+
+// escapeGlob escapes the gitignore pattern characters in a path, so a
+// rule matches the path as spelled. Parentheses need no escaping.
+func escapeGlob(path string) string {
+	var b strings.Builder
+	for _, r := range path {
+		if strings.ContainsRune(`\*?[]`, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // rulePath writes an absolute path the way Claude Code matches it in

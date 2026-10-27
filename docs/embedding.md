@@ -65,8 +65,10 @@ For an SSH remote, the clone and the refresh run ssh as
   error such as `Host key verification failed`. Connect once with
   `ssh -T git@<host>` to accept the host key.
 
-Set `pack.GitOptions.ConnectTimeout` in `pack.GitWith` to change the 10
-seconds. The wrapper only sets the ssh command when the user has none:
+Options on the ssh command line take precedence over `~/.ssh/config`, so
+a `ConnectTimeout` or `BatchMode no` set there does not apply to pack
+fetches. Set `pack.GitOptions.ConnectTimeout` in `pack.GitWith` to change
+the 10 seconds. The wrapper only sets the ssh command when the user has none:
 `GIT_SSH_COMMAND` or `GIT_SSH` in the environment, or `core.sshCommand`
 in git config, is used unchanged and gets neither option.
 `pack.GitOptions.Env` sets the environment git runs with (default

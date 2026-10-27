@@ -213,9 +213,13 @@ Read(//home/me/.cache/coding-agent-wrapper/git/3f2a.../**)
 - The rule covers the whole pack directory, because skills read files
   that sit outside the plugin directory too. It grants reads only: no
   edits, and nothing in the project or elsewhere.
-- It is added even when the pack has no `settings.json` or `policy.json`;
-  the wrapper then writes a settings file holding the user and project
-  layers plus the rule.
+- When the pack directory is a git checkout, `permissions.deny` also gets
+  `Read(//<pack>/.git/**)`, because `.git/config` can hold a remote URL
+  with a token. A pack rooted at a `#subdir` has no `.git` inside it.
+- It is added even when the pack has no `settings.json` or `policy.json`.
+  The wrapper then writes a settings file holding only the rules, and
+  Claude Code combines them with the permission rules of the user and
+  project settings, which it keeps reading from their own files.
 - `permissions.allow` unions across layers, so a user or project allow
   list cannot remove the rule. Claude Code evaluates deny rules before
   allow rules, so a deny rule in `policy.json` or managed settings still
@@ -226,7 +230,10 @@ Read(//home/me/.cache/coding-agent-wrapper/git/3f2a.../**)
   `C:\Users\me\AppData\Local\...` is `Read(//c/Users/me/AppData/Local/...)`.
   When the pack path goes through a symlink, a second rule covers the real
   location, because Claude Code only allows a read when both the path and
-  its target match.
+  its target match. A symlink inside the pack that points outside it gets
+  no rule, so reads through it still prompt.
+- Characters that gitignore patterns treat specially (`*`, `?`, `[`, `]`)
+  are escaped, so the rule matches the path as spelled.
 
 The launch notes name the rule (`pack files are readable without a
 prompt ...`), so `wr doctor` shows it.

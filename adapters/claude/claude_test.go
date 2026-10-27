@@ -686,16 +686,24 @@ func TestBuildPluginMakesPackReadable(t *testing.T) {
 	if _, ok := argValue(t, launch.Args, "--settings"); !ok {
 		t.Fatalf("a plugin-only pack still needs a settings file, args = %q", launch.Args)
 	}
-	allow := readMerged(t, launch)["permissions"].(map[string]any)["allow"].([]any)
-	want := []any{"WebSearch", "Bash(make)", rule}
-	if !slices.Equal(allow, want) {
-		t.Fatalf("allow = %v, want %v", allow, want)
+	// The file holds only the rule: Claude Code combines it with the user
+	// and project allow lists itself, which stay in their own files.
+	merged := readMerged(t, launch)
+	if len(merged) != 1 {
+		t.Fatalf("a plugin-only pack should write only the read rule, got %v", merged)
+	}
+	if allow := merged["permissions"].(map[string]any)["allow"].([]any); !slices.Equal(allow, []any{rule}) {
+		t.Fatalf("allow = %v, want [%s]", allow, rule)
+	}
+	if slices.ContainsFunc(launch.Notes, func(n string) bool { return strings.HasPrefix(n, "settings layers") }) {
+		t.Fatalf("no layers are merged for a plugin-only pack, notes = %q", launch.Notes)
 	}
 	note := "pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets " + rule + " (read only; deny rules still win)"
 	if !slices.Contains(launch.Notes, note) {
 		t.Fatalf("expected a note naming the rule, got %q", launch.Notes)
 	}
 
+	// With policy, the layers are merged as usual and the rule joins them.
 	// Policy deny rules sit next to the grant, and Claude Code evaluates
 	// deny before allow.
 	launch, err = a.Build(context.Background(), pluginOnlyPack(t, `{"permissions":{"deny":["Read(//**/secrets/**)"]}}`), wrapper.BuildOptions{})
@@ -771,5 +779,38 @@ func TestRulePath(t *testing.T) {
 		if got := claude.RulePath(in); got != want {
 			t.Errorf("RulePath(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestBuildPackReadRuleDeniesGitAndEscapesGlobs(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "work[acme] (old)*")
+	for _, sub := range []string{".git", filepath.Join("claude", "plugin")} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := pack.Load(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	escaped := "/" + root + `/work\[acme\] (old)\*`
+	perms := readMerged(t, launch)["permissions"].(map[string]any)
+	if allow := perms["allow"].([]any); !slices.Equal(allow, []any{"Read(" + escaped + "/**)"}) {
+		t.Fatalf("allow = %v", allow)
+	}
+	if deny := perms["deny"].([]any); !slices.Equal(deny, []any{"Read(" + escaped + "/.git/**)"}) {
+		t.Fatalf("the checkout's .git should stay denied, deny = %v", deny)
 	}
 }
