@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // FetchOptions controls how a Source materializes the pack.
@@ -106,7 +107,29 @@ type GitOptions struct {
 	// subdirectory per URL and ref. Empty means
 	// <user cache dir>/coding-agent-wrapper/git.
 	CacheDir string
+	// Env is the environment git runs with; nil means os.Environ. Git
+	// always gets GIT_TERMINAL_PROMPT=0 on top of it.
+	Env []string
+	// ConnectTimeout bounds how long ssh waits to connect to the remote
+	// when cloning or refreshing; zero means DefaultConnectTimeout. It
+	// applies only when the wrapper sets the ssh command (see
+	// DefaultConnectTimeout).
+	ConnectTimeout time.Duration
 }
+
+// DefaultConnectTimeout bounds ssh connections to a git pack's remote.
+//
+// When neither Env nor the process environment sets GIT_SSH_COMMAND or
+// GIT_SSH, and git config sets no core.sshCommand, clone and refresh run
+// ssh as
+//
+//	ssh -o BatchMode=yes -o ConnectTimeout=<seconds>
+//
+// so an unreachable remote fails after the timeout instead of the
+// system's TCP timeout, and ssh fails instead of waiting for input (an
+// unknown host key, a key passphrase not held by ssh-agent). A custom ssh
+// command is left alone. HTTPS remotes are not affected.
+const DefaultConnectTimeout = 10 * time.Second
 
 // GitWith is Git with options. It accepts the same URL forms as Git,
 // including the "#subdir" suffix.
@@ -124,14 +147,20 @@ func GitWith(url, ref string, o GitOptions) Source {
 		root = filepath.Join(base, "coding-agent-wrapper", "git")
 	}
 	dir := filepath.Join(root, cacheKey(url+"\x00"+ref))
-	return gitSource{url: url, ref: ref, dir: dir, sub: sub}
+	timeout := o.ConnectTimeout
+	if timeout <= 0 {
+		timeout = DefaultConnectTimeout
+	}
+	return gitSource{url: url, ref: ref, dir: dir, sub: sub, env: o.Env, connectTimeout: timeout}
 }
 
 type gitSource struct {
-	url string
-	ref string
-	dir string
-	sub string
+	url            string
+	ref            string
+	dir            string
+	sub            string
+	env            []string
+	connectTimeout time.Duration
 }
 
 func (g gitSource) Describe() string {

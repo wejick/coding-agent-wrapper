@@ -406,3 +406,112 @@ func TestGitRefreshOfDeletedBranchKeepsCacheWithNote(t *testing.T) {
 		t.Fatal("a failed refresh must not count as a sync")
 	}
 }
+
+// fakeSSH puts executables named ssh and myssh on PATH that append their
+// name and arguments to a log and fail like an unreachable host. It
+// returns an environment for GitOptions.Env with no ssh command and no
+// user or system git config, and the log's path.
+func fakeSSH(t *testing.T) ([]string, string) {
+	t.Helper()
+	bin := t.TempDir()
+	log := filepath.Join(t.TempDir(), "ssh.log")
+	for _, name := range []string{"ssh", "myssh"} {
+		body := "#!/bin/sh\necho \"" + name + " $*\" >> " + log + "\nexit 255\n"
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var env []string
+	for _, kv := range os.Environ() {
+		switch k, _, _ := strings.Cut(kv, "="); k {
+		case "PATH", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM":
+		default:
+			env = append(env, kv)
+		}
+	}
+	env = append(env,
+		"PATH="+bin+string(filepath.ListSeparator)+os.Getenv("PATH"),
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_CONFIG_NOSYSTEM=1",
+	)
+	return env, log
+}
+
+func readLog(t *testing.T, log string) string {
+	t.Helper()
+	data, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+const sshURL = "git@example.invalid:acme/pack.git"
+
+func TestGitCloneUsesBoundedNonInteractiveSSH(t *testing.T) {
+	env, log := fakeSSH(t)
+	src := GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: env})
+	if _, err := src.Fetch(context.Background(), FetchOptions{}); err == nil {
+		t.Fatal("expected the clone to fail")
+	}
+	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o BatchMode=yes -o ConnectTimeout=10 ") || !strings.Contains(got, "example.invalid") {
+		t.Fatalf("ssh was run as %q", got)
+	}
+
+	env, log = fakeSSH(t)
+	src = GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: env, ConnectTimeout: 1500 * time.Millisecond})
+	if _, err := src.Fetch(context.Background(), FetchOptions{}); err == nil {
+		t.Fatal("expected the clone to fail")
+	}
+	if got := readLog(t, log); !strings.Contains(got, "-o ConnectTimeout=2 ") {
+		t.Fatalf("ConnectTimeout should round up to whole seconds, ssh was run as %q", got)
+	}
+}
+
+func TestGitKeepsTheUsersSSHCommand(t *testing.T) {
+	env, log := fakeSSH(t)
+	src := GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: append(env, "GIT_SSH_COMMAND=myssh")})
+	if _, err := src.Fetch(context.Background(), FetchOptions{}); err == nil {
+		t.Fatal("expected the clone to fail")
+	}
+	if got := readLog(t, log); !strings.HasPrefix(got, "myssh ") || strings.Contains(got, "BatchMode") {
+		t.Fatalf("GIT_SSH_COMMAND should be used as is, ssh was run as %q", got)
+	}
+
+	env, log = fakeSSH(t)
+	config := filepath.Join(t.TempDir(), "gitconfig")
+	if err := os.WriteFile(config, []byte("[core]\n\tsshCommand = myssh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env = append(env, "GIT_CONFIG_GLOBAL="+config) // the last entry wins
+	src = GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: env})
+	if _, err := src.Fetch(context.Background(), FetchOptions{}); err == nil {
+		t.Fatal("expected the clone to fail")
+	}
+	if got := readLog(t, log); !strings.HasPrefix(got, "myssh ") || strings.Contains(got, "BatchMode") {
+		t.Fatalf("core.sshCommand should be used as is, ssh was run as %q", got)
+	}
+}
+
+func TestGitRefreshUsesBoundedSSHAndFallsBack(t *testing.T) {
+	origin := initRepo(t)
+	commitFile(t, origin, "v1.txt", "one")
+	env, log := fakeSSH(t)
+	src := GitWith(origin, "", GitOptions{CacheDir: t.TempDir(), Env: env})
+	res, err := src.Fetch(context.Background(), FetchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, res.Dir, "remote", "set-url", "origin", sshURL)
+
+	res, err = src.Fetch(context.Background(), FetchOptions{Refresh: true})
+	if err != nil || res.RefreshErr == nil || res.From != "cache" {
+		t.Fatalf("a failed refresh should fall back to the cache: res = %+v, err = %v", res, err)
+	}
+	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o BatchMode=yes -o ConnectTimeout=10 ") {
+		t.Fatalf("ssh was run as %q", got)
+	}
+	if readPackFile(t, res.Dir, "v1.txt") != "one" {
+		t.Fatal("the cached pack should still be served")
+	}
+}

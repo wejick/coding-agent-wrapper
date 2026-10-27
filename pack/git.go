@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -57,7 +59,7 @@ func (g gitSource) clone(ctx context.Context) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	if _, err := git(ctx, "", "clone", "--quiet", g.url, tmp); err != nil {
+	if _, err := git(ctx, "", g.remoteEnv(ctx, tmp), "clone", "--quiet", g.url, tmp); err != nil {
 		return fmt.Errorf("pack: cloning %s: %w", g.url, err)
 	}
 	if err := g.checkout(ctx, tmp); err != nil {
@@ -78,7 +80,7 @@ func (g gitSource) clone(ctx context.Context) error {
 // refresh fetches from the remote and moves the checkout to the latest
 // commit of the requested ref.
 func (g gitSource) refresh(ctx context.Context) error {
-	if _, err := git(ctx, g.dir, "fetch", "--quiet", "--all", "--prune", "--tags"); err != nil {
+	if _, err := git(ctx, g.dir, g.remoteEnv(ctx, g.dir), "fetch", "--quiet", "--all", "--prune", "--tags"); err != nil {
 		return err
 	}
 	if err := g.checkout(ctx, g.dir); err != nil {
@@ -95,14 +97,14 @@ func (g gitSource) checkout(ctx context.Context, dir string) error {
 	ref := g.ref
 	if ref == "" {
 		// The remote's default branch, as recorded by clone.
-		out, err := git(ctx, dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+		out, err := git(ctx, dir, g.env, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
 		if err != nil {
 			return errors.New("no ref pinned and the remote's default branch is unknown; pin a ref for deterministic refresh")
 		}
 		ref = strings.TrimPrefix(out, "origin/")
 	}
 	verify := func(name string) bool {
-		_, err := git(ctx, dir, "rev-parse", "--verify", "--quiet", name)
+		_, err := git(ctx, dir, g.env, "rev-parse", "--verify", "--quiet", name)
 		return err == nil
 	}
 	var args []string
@@ -119,7 +121,7 @@ func (g gitSource) checkout(ctx context.Context, dir string) error {
 	default:
 		return fmt.Errorf("ref %q not found in %s", g.ref, g.url)
 	}
-	if _, err := git(ctx, dir, args...); err != nil {
+	if _, err := git(ctx, dir, g.env, args...); err != nil {
 		return fmt.Errorf("checking out %s in %s: %w", ref, g.url, err)
 	}
 	return nil
@@ -137,19 +139,55 @@ func markSynced(dir string) error {
 // HeadInfo returns a short "abc1234 2026-09-13 msg" line for the pack HEAD,
 // or "" when dir is not a git checkout.
 func HeadInfo(ctx context.Context, dir string) string {
-	out, err := git(ctx, dir, "log", "-1", "--format=%h %cs %s")
+	out, err := git(ctx, dir, nil, "log", "-1", "--format=%h %cs %s")
 	if err != nil {
 		return ""
 	}
 	return out
 }
 
-// git runs git in dir and returns its trimmed combined output. Errors carry
-// the command and its output.
-func git(ctx context.Context, dir string, args ...string) (string, error) {
+// remoteEnv is the environment for the git commands that contact the
+// remote: g.env plus the bounded, non-interactive ssh command described at
+// DefaultConnectTimeout, unless the user configured an ssh command of
+// their own. dir is where git config is read from.
+func (g gitSource) remoteEnv(ctx context.Context, dir string) []string {
+	env := g.env
+	if env == nil {
+		env = os.Environ()
+	}
+	for _, key := range []string{"GIT_SSH_COMMAND", "GIT_SSH"} {
+		if envValue(env, key) != "" {
+			return env
+		}
+	}
+	if _, err := git(ctx, dir, env, "config", "--get", "core.sshCommand"); err == nil {
+		return env
+	}
+	secs := int(math.Ceil(g.connectTimeout.Seconds()))
+	return append(slices.Clip(env), fmt.Sprintf("GIT_SSH_COMMAND=ssh -o BatchMode=yes -o ConnectTimeout=%d", secs))
+}
+
+// envValue returns the value of key in env, a KEY=VALUE list in which the
+// last entry wins, as it does for exec.
+func envValue(env []string, key string) string {
+	value := ""
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == key {
+			value = v
+		}
+	}
+	return value
+}
+
+// git runs git in dir with env (nil means os.Environ) and returns its
+// trimmed combined output. Errors carry the command and its output.
+func git(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	if env == nil {
+		env = os.Environ()
+	}
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(slices.Clip(env), "GIT_TERMINAL_PROMPT=0")
 	out, err := cmd.CombinedOutput()
 	trimmed := strings.TrimSpace(string(out))
 	if err != nil {

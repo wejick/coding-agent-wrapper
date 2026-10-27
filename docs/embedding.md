@@ -36,10 +36,9 @@ The first fetch uses the cache (or clones on first use). When the
 checkout last synced more than an hour ago, the second fetch refreshes it;
 a refresh that fails falls back to the cached copy. A failed refresh does
 not update the sync time, so while the remote is unreachable every launch
-retries the refresh and waits for git to give up. Pass a `ctx` with a
-timeout to the refreshing fetch if that wait matters. With `Fetched` set, `Prepare` loads the
-pack from `res.Dir` and does not fetch again. The returned launch then
-describes that fetch:
+retries the refresh and waits for git to give up. With `Fetched` set,
+`Prepare` loads the pack from `res.Dir` and does not fetch again. The
+returned launch then describes that fetch:
 
 - `Launch.Source` ends in `res.From`: `(git)` after a clone or a
   successful refresh, `(cache)` when the cached copy was used (including
@@ -50,6 +49,34 @@ describes that fetch:
 `Pack` is still required, because `Launch.Source` uses its `Describe`
 label. `Options.Refresh` is ignored when `Fetched` is set, and the launch
 notes record that.
+
+### How long a refresh waits on an unreachable remote
+
+For an SSH remote, the clone and the refresh run ssh as
+`ssh -o BatchMode=yes -o ConnectTimeout=10`:
+
+- `ConnectTimeout` makes a remote that drops packets (no network, VPN
+  down) fail after 10 seconds, and the launch falls back to the cached
+  pack. Without it, ssh waits for the system's TCP connect timeout, often
+  more than a minute. A transfer that has connected is not limited, so a
+  first clone of a large pack on a slow link still completes.
+- `BatchMode` makes ssh fail instead of waiting for input. An unknown
+  host key or a key passphrase that ssh-agent does not hold becomes an
+  error such as `Host key verification failed`. Connect once with
+  `ssh -T git@<host>` to accept the host key.
+
+Set `pack.GitOptions.ConnectTimeout` in `pack.GitWith` to change the 10
+seconds. The wrapper only sets the ssh command when the user has none:
+`GIT_SSH_COMMAND` or `GIT_SSH` in the environment, or `core.sshCommand`
+in git config, is used unchanged and gets neither option.
+`pack.GitOptions.Env` sets the environment git runs with (default
+`os.Environ()`), so a caller can pass its own `GIT_SSH_COMMAND` for the
+pack without changing its process environment or the agent's.
+
+HTTPS remotes are not bounded this way; git has no connect timeout for
+them. Pass a `ctx` with a timeout to the refreshing fetch when that wait
+matters, or set `GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME`
+in `GitOptions.Env` to abort a stalled transfer.
 
 ## Listing the skills a pack provides
 
