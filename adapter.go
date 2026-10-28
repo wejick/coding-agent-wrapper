@@ -46,8 +46,11 @@ type Headless struct {
 	Model string
 	// Effort is an optional effort level.
 	Effort string
-	// Unattended turns off permission prompts.
+	// Unattended requests the agent's bypass permission mode.
 	Unattended bool
+	// PermissionMode is passed to the agent as its permission mode.
+	// Mutually exclusive with Unattended.
+	PermissionMode string
 }
 
 // ErrHeadlessUnsupported is returned by adapters whose agent has no

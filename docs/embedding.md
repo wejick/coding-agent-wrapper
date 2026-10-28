@@ -36,10 +36,9 @@ The first fetch uses the cache (or clones on first use). When the
 checkout last synced more than an hour ago, the second fetch refreshes it;
 a refresh that fails falls back to the cached copy. A failed refresh does
 not update the sync time, so while the remote is unreachable every launch
-retries the refresh and waits for git to give up. Pass a `ctx` with a
-timeout to the refreshing fetch if that wait matters. With `Fetched` set, `Prepare` loads the
-pack from `res.Dir` and does not fetch again. The returned launch then
-describes that fetch:
+retries the refresh and waits for git to give up. With `Fetched` set,
+`Prepare` loads the pack from `res.Dir` and does not fetch again. The
+returned launch then describes that fetch:
 
 - `Launch.Source` ends in `res.From`: `(git)` after a clone or a
   successful refresh, `(cache)` when the cached copy was used (including
@@ -50,6 +49,27 @@ describes that fetch:
 `Pack` is still required, because `Launch.Source` uses its `Describe`
 label. `Options.Refresh` is ignored when `Fetched` is set, and the launch
 notes record that.
+
+### Unreachable remotes
+
+For an SSH remote, clone and refresh run `ssh -o ConnectTimeout=10`. An
+unreachable remote fails after 10 seconds and the launch uses the cached
+pack. ssh can still ask the user to accept a new host key or enter a
+passphrase. A user's own `GIT_SSH_COMMAND`, `GIT_SSH` or
+`core.sshCommand` is used unchanged instead.
+
+`pack.GitOptions` changes this per source:
+
+- `ConnectTimeout` replaces the 10 seconds.
+- `BatchMode` adds `-o BatchMode=yes`, so ssh fails instead of waiting
+  for input. Set it when no user is at the terminal (a CI job, a
+  headless `RunChild` loop); otherwise a prompt blocks the launch. `wr`
+  sets it when stdin is not a terminal.
+- `Env` sets the environment git runs with.
+
+HTTPS remotes have no connect timeout; bound them with a `ctx` deadline,
+or with `GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME` in
+`Env`.
 
 ## Listing the skills a pack provides
 
@@ -88,11 +108,12 @@ if skills := a.Skills(p); skills != nil {
 ```
 
 Each `pack.Skill` carries the `name` and `description` from the
-`SKILL.md` frontmatter and the path of the file. `Name` or `Description`
-is empty when the frontmatter does not set it, so a pack's CI can check
-that every skill has both. An agent whose pack directory has no skills
-returns an empty list. `wr doctor` prints the list under each agent's launch as `skill:`
-lines, and `wr doctor --json` includes it as `skills`.
+`SKILL.md` frontmatter and the path of the file. A skill without a
+frontmatter `name` is named after its directory, as the agent names it.
+`List` sorts by `Name`, then `Path`. An agent whose pack directory has no
+skills returns an empty list. `wr doctor` prints the list under each
+agent's launch as `skill:` lines, and `wr doctor --json` includes it as
+`skills`.
 
 ## Running an agent headless
 
@@ -148,18 +169,22 @@ field. For `/src/page` above, the arguments end in:
 | --- | --- |
 | `Prompt` (required) | `-p <prompt>` |
 | `Unattended` | `--permission-mode bypassPermissions` |
+| `PermissionMode` | `--permission-mode <mode>` |
 | `Model` | `--model <model>` |
 | `Effort` | `--effort <effort>` |
 
-A settings layer that sets `permissions.disableBypassPermissionsMode` to
-`"disable"` still applies and keeps Claude Code out of bypass mode, so
-`Unattended` has no effect under it. Nobody can answer a permission
-prompt in print mode, so tool calls that need permission are denied; the
-unattended note says so. The prompt is passed as a bare argument, so the
-adapter rejects a prompt that starts with `-`. Flags such as
-`--output-format json` go in `Options.Args`. Keep `Options.Args` to flags
-in a headless launch: a positional argument there lands after the prompt
-and Claude Code reads it as more prompt text.
+Nobody can answer a permission prompt in print mode, so a tool call that
+would prompt is denied. `PermissionMode` passes a Claude Code permission
+mode through, so a task that only edits files can ask for `acceptEdits`
+instead of full bypass. `Unattended` asks for `bypassPermissions`, which
+settings (including managed settings the wrapper cannot read) may
+disable; the launch notes say so. Setting both is an error.
+
+The prompt is passed as a bare argument, so the adapter rejects a prompt
+that starts with `-`, and a permission mode that starts with `-`. Flags
+such as `--output-format json` go in `Options.Args`. Keep `Options.Args`
+to flags in a headless launch: a positional argument there lands after
+the prompt and Claude Code reads it as more prompt text.
 The OpenCode adapter has no headless mapping yet and returns
 `wrapper.ErrHeadlessUnsupported`; check for it with `errors.Is`.
 
@@ -181,9 +206,10 @@ The OpenCode adapter has no headless mapping yet and returns
    running 10 seconds later (off UNIX it is killed at once).
 5. It returns the child's exit code. A child that could not start or was
    killed by a signal returns `-1` and an error, which wraps `ctx.Err()`
-   when `ctx` was done. A child that exits on its own after `ctx` is done
-   returns its exit code and `ctx.Err()`. A failing `Stdout` or `Stderr`
-   writer returns the exit code with an error.
+   when `ctx` was done. For a signal, it also wraps the `*exec.ExitError`,
+   whose `ProcessState` names the signal. A child that exits on its own
+   after `ctx` is done returns its exit code and `ctx.Err()`. A failing
+   `Stdout` or `Stderr` writer returns the exit code with an error.
 6. A process the agent leaves behind (a background Bash task, an MCP
    server) can keep the agent's stdout or stderr open after the agent
    exits. `RunChild` stops reading that output 10 seconds after the

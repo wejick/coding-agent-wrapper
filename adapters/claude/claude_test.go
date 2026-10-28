@@ -104,8 +104,8 @@ func TestBuildFullPackLayering(t *testing.T) {
 	}
 	perms := merged["permissions"].(map[string]any)
 	allow := perms["allow"].([]any)
-	if len(allow) != 4 {
-		t.Fatalf("permission lists should union (org 3 + user 1), got %v", allow)
+	if len(allow) != 5 {
+		t.Fatalf("permission lists should union (org 3 + user 1 + pack read 1), got %v", allow)
 	}
 	env := merged["env"].(map[string]any)
 	if env["BASH_DEFAULT_TIMEOUT_MS"] != "120000" {
@@ -187,9 +187,9 @@ func TestBuildProjectLayering(t *testing.T) {
 	}
 	perms := merged["permissions"].(map[string]any)
 	allow := perms["allow"].([]any)
-	// org 3 + user 1 + project 1, unioned.
-	if len(allow) != 5 {
-		t.Fatalf("expected 5 unioned allow entries across layers, got %v", allow)
+	// org 3 + user 1 + project 1 + pack read 1, unioned.
+	if len(allow) != 6 {
+		t.Fatalf("expected 6 unioned allow entries across layers, got %v", allow)
 	}
 	if merged["includeCoAuthoredBy"] != false {
 		t.Fatalf("org default should survive beneath every layer, got %v", merged["includeCoAuthoredBy"])
@@ -281,6 +281,51 @@ func TestBuildHeadless(t *testing.T) {
 			Headless: &wrapper.Headless{Prompt: prompt},
 		}); err == nil {
 			t.Errorf("prompt %q: expected an error", prompt)
+		}
+	}
+}
+
+func TestBuildHeadlessPermissionMode(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	a.ProjectDir = t.TempDir()
+	p := testPack(t)
+
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{
+		Headless: &wrapper.Headless{Prompt: "fix it", PermissionMode: "acceptEdits"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "fix it", "--permission-mode", "acceptEdits"}
+	if got := launch.Args[len(launch.Args)-len(want):]; !slices.Equal(got, want) {
+		t.Fatalf("args end = %q, want %q", got, want)
+	}
+	note := "headless: permission mode acceptEdits (--permission-mode); nobody can answer a prompt, so tool calls that need a permission this mode does not grant are denied"
+	if !slices.Contains(launch.Notes, note) {
+		t.Fatalf("expected the permission mode note, got %q", launch.Notes)
+	}
+
+	launch, err = a.Build(context.Background(), p, wrapper.BuildOptions{
+		Headless: &wrapper.Headless{Prompt: "fix it", Unattended: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(launch.Notes, func(n string) bool {
+		return strings.HasPrefix(n, "headless: bypass mode requested") && strings.Contains(n, "managed settings, which the wrapper cannot read, may disable it")
+	}) {
+		t.Fatalf("expected the bypass note to name managed settings, got %q", launch.Notes)
+	}
+
+	for name, h := range map[string]*wrapper.Headless{
+		"both":       {Prompt: "fix it", Unattended: true, PermissionMode: "acceptEdits"},
+		"flag shape": {Prompt: "fix it", PermissionMode: "--dangerously-skip-permissions"},
+	} {
+		if _, err := a.Build(context.Background(), p, wrapper.BuildOptions{Headless: h}); err == nil {
+			t.Errorf("%s: expected an error", name)
 		}
 	}
 }
@@ -591,5 +636,201 @@ func TestSkillsEmptyWithoutPlugin(t *testing.T) {
 	skills, err := claude.New().Skills(p).List()
 	if err != nil || len(skills) != 0 {
 		t.Fatalf("skills = %+v, err = %v", skills, err)
+	}
+}
+
+// pluginOnlyPack writes a pack with claude/plugin/ and an optional
+// policy.json, at a symlink-free path.
+func pluginOnlyPack(t *testing.T, policy string) *pack.Pack {
+	t.Helper()
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "claude", "plugin", "skills"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if policy != "" {
+		if err := os.WriteFile(filepath.Join(dir, "claude", "policy.json"), []byte(policy), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := pack.Load(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestBuildPluginMakesPackReadable(t *testing.T) {
+	fakeBinary(t)
+	homeWithUserSettings(t, `{"permissions":{"allow":["WebSearch"]}}`)
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	p := pluginOnlyPack(t, "")
+
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{
+		Dir: dirWithSettings(t, `{"permissions":{"allow":["Bash(make)"]}}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rule := "Read(/" + p.Dir + "/**)"
+	if !strings.HasPrefix(rule, "Read(//") {
+		t.Fatalf("rule %q should use the absolute // form", rule)
+	}
+	if _, ok := argValue(t, launch.Args, "--settings"); !ok {
+		t.Fatalf("a plugin-only pack still needs a settings file, args = %q", launch.Args)
+	}
+	merged := readMerged(t, launch)
+	if len(merged) != 1 {
+		t.Fatalf("a plugin-only pack should write only the read rule, got %v", merged)
+	}
+	if allow := merged["permissions"].(map[string]any)["allow"].([]any); !slices.Equal(allow, []any{rule}) {
+		t.Fatalf("allow = %v, want [%s]", allow, rule)
+	}
+	if slices.ContainsFunc(launch.Notes, func(n string) bool { return strings.HasPrefix(n, "settings layers") }) {
+		t.Fatalf("no layers are merged for a plugin-only pack, notes = %q", launch.Notes)
+	}
+	note := "pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets " + rule + " (read only; deny rules still win)"
+	if !slices.Contains(launch.Notes, note) {
+		t.Fatalf("expected a note naming the rule, got %q", launch.Notes)
+	}
+
+	launch, err = a.Build(context.Background(), pluginOnlyPack(t, `{"permissions":{"deny":["Read(//**/secrets/**)"]}}`), wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms := readMerged(t, launch)["permissions"].(map[string]any)
+	if len(perms["allow"].([]any)) != 2 || len(perms["deny"].([]any)) != 1 {
+		t.Fatalf("permissions = %v", perms)
+	}
+}
+
+func TestBuildPackReadRuleCoversSymlinkTarget(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	real := pluginOnlyPack(t, "").Dir
+	link := filepath.Join(t.TempDir(), "pack")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	p, err := pack.Load(link, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allow := readMerged(t, launch)["permissions"].(map[string]any)["allow"].([]any)
+	want := []any{"Read(/" + link + "/**)", "Read(/" + real + "/**)"}
+	if !slices.Equal(allow, want) {
+		t.Fatalf("allow = %v, want %v", allow, want)
+	}
+}
+
+func TestBuildWithoutPluginGrantsNoReads(t *testing.T) {
+	fakeBinary(t)
+	homeWithUserSettings(t, `{}`)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "claude", "settings.json"), []byte(`{"model":"sonnet"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := pack.Load(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readMerged(t, launch)["permissions"]; ok {
+		t.Fatal("a pack without a plugin should grant no reads")
+	}
+}
+
+func TestRulePath(t *testing.T) {
+	for in, want := range map[string]string{
+		"/home/me/.cache/pack": "/home/me/.cache/pack",
+		`C:\Users\me\pack`:     "/c/Users/me/pack",
+		`d:\packs`:             "/d/packs",
+	} {
+		if strings.Contains(in, `\`) && filepath.Separator != '\\' {
+			in = strings.ReplaceAll(in, `\`, "/")
+		}
+		if got := claude.RulePath(in); got != want {
+			t.Errorf("RulePath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBuildPackReadRuleDeniesGitAndEscapesGlobs(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "work[acme] (old)*")
+	for _, sub := range []string{".git", filepath.Join("claude", "plugin")} {
+		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := pack.Load(dir, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch, err := a.Build(context.Background(), p, wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	escaped := "/" + root + `/work\[acme\] (old)\*`
+	perms := readMerged(t, launch)["permissions"].(map[string]any)
+	if allow := perms["allow"].([]any); !slices.Equal(allow, []any{"Read(" + escaped + "/**)"}) {
+		t.Fatalf("allow = %v", allow)
+	}
+	if deny := perms["deny"].([]any); !slices.Equal(deny, []any{"Read(" + escaped + "/.git/**)"}) {
+		t.Fatalf("the checkout's .git should stay denied, deny = %v", deny)
+	}
+}
+
+func TestBuildSkipPackRead(t *testing.T) {
+	fakeBinary(t)
+	t.Setenv("HOME", t.TempDir())
+	a := claude.New()
+	a.CacheDir = t.TempDir()
+	a.SkipPackRead = true
+
+	launch, err := a.Build(context.Background(), pluginOnlyPack(t, ""), wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := argValue(t, launch.Args, "--settings"); ok {
+		t.Fatalf("a plugin-only pack without the grant needs no settings file, args = %q", launch.Args)
+	}
+	if _, ok := argValue(t, launch.Args, "--plugin-dir"); !ok {
+		t.Fatalf("the plugin should still load, args = %q", launch.Args)
+	}
+	if !slices.Contains(launch.Notes, "pack read access not granted (SkipPackRead); the org plugin's skills prompt before reading pack files") {
+		t.Fatalf("expected a note about the skipped grant, got %q", launch.Notes)
+	}
+
+	launch, err = a.Build(context.Background(), pluginOnlyPack(t, `{"permissions":{"deny":["Read(./.env)"]}}`), wrapper.BuildOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readMerged(t, launch)["permissions"].(map[string]any)["allow"]; ok {
+		t.Fatal("SkipPackRead should leave out the allow rule")
 	}
 }

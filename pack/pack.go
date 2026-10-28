@@ -34,6 +34,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // FetchOptions controls how a Source materializes the pack.
@@ -106,7 +107,18 @@ type GitOptions struct {
 	// subdirectory per URL and ref. Empty means
 	// <user cache dir>/coding-agent-wrapper/git.
 	CacheDir string
+	// Env is the environment git runs with; nil means os.Environ.
+	Env []string
+	// ConnectTimeout bounds ssh connects; zero means
+	// DefaultConnectTimeout. Ignored when the user sets an ssh command.
+	ConnectTimeout time.Duration
+	// BatchMode stops ssh from asking for input, such as accepting a new
+	// host key; it fails instead. Set it when no user is at the terminal.
+	BatchMode bool
 }
+
+// DefaultConnectTimeout is the ssh connect timeout for pack fetches.
+const DefaultConnectTimeout = 10 * time.Second
 
 // GitWith is Git with options. It accepts the same URL forms as Git,
 // including the "#subdir" suffix.
@@ -124,14 +136,21 @@ func GitWith(url, ref string, o GitOptions) Source {
 		root = filepath.Join(base, "coding-agent-wrapper", "git")
 	}
 	dir := filepath.Join(root, cacheKey(url+"\x00"+ref))
-	return gitSource{url: url, ref: ref, dir: dir, sub: sub}
+	timeout := o.ConnectTimeout
+	if timeout <= 0 {
+		timeout = DefaultConnectTimeout
+	}
+	return gitSource{url: url, ref: ref, dir: dir, sub: sub, env: o.Env, connectTimeout: timeout, batchMode: o.BatchMode}
 }
 
 type gitSource struct {
-	url string
-	ref string
-	dir string
-	sub string
+	url            string
+	ref            string
+	dir            string
+	sub            string
+	env            []string
+	connectTimeout time.Duration
+	batchMode      bool
 }
 
 func (g gitSource) Describe() string {

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -111,6 +112,33 @@ func TestRunChildCancelKillsAfterGrace(t *testing.T) {
 	code, err := launch.RunChild(ctx, wrapper.RunOptions{Stdout: onReady{new(sync.Once), cancel}})
 	if code != -1 || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "killed") {
 		t.Fatalf("code = %d, err = %v, want -1 and a killed error wrapping context.Canceled", code, err)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != -1 {
+		t.Fatalf("err = %v, want it to wrap the *exec.ExitError", err)
+	}
+	if ws, ok := exitErr.Sys().(syscall.WaitStatus); !ok || ws.Signal() != syscall.SIGKILL {
+		t.Fatalf("exit status = %v, want killed by SIGKILL", exitErr.ProcessState)
+	}
+}
+
+func TestRunChildKilledBySignalWrapsExitError(t *testing.T) {
+	launch := &wrapper.Launch{Binary: script(t, `kill -TERM $$; sleep 1`)}
+	code, err := launch.RunChild(context.Background(), wrapper.RunOptions{})
+	var exitErr *exec.ExitError
+	if code != -1 || !errors.As(err, &exitErr) {
+		t.Fatalf("code = %d, err = %v, want -1 and an error wrapping *exec.ExitError", code, err)
+	}
+	if ws, ok := exitErr.Sys().(syscall.WaitStatus); !ok || ws.Signal() != syscall.SIGTERM {
+		t.Fatalf("exit status = %v, want killed by SIGTERM", exitErr.ProcessState)
+	}
+	if err.Error() != "wrapper: "+launch.Binary+": signal: terminated" {
+		t.Fatalf("err = %q, want the process state in the message", err)
+	}
+
+	start := &wrapper.Launch{Binary: filepath.Join(t.TempDir(), "missing")}
+	if _, err := start.RunChild(context.Background(), wrapper.RunOptions{}); errors.As(err, &exitErr) {
+		t.Fatalf("a start failure should not wrap *exec.ExitError: %v", err)
 	}
 }
 

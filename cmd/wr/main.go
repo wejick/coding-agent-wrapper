@@ -156,7 +156,8 @@ func source() (pack.Source, error) {
 	if info, err := os.Stat(g.packRef); err == nil && info.IsDir() {
 		return pack.Local(g.packRef), nil
 	}
-	return pack.Git(g.packRef, g.rev), nil
+	// Without a user at the terminal, ssh fails instead of prompting.
+	return pack.GitWith(g.packRef, g.rev, pack.GitOptions{BatchMode: !isTerminal(os.Stdin)}), nil
 }
 
 // options never asks the launch to refresh: --refresh is handled up front

@@ -64,7 +64,8 @@ callers use it.
 5. Map `o.Headless` to the agent's non-interactive flags, after the
    injected flags and before `o.Args`, with one note per field. When the
    agent has no headless mode, return `wrapper.ErrHeadlessUnsupported`
-   (wrapped is fine) instead of ignoring the request.
+   (wrapped is fine) instead of ignoring the request. Likewise, return an
+   error for a `Headless.PermissionMode` the agent cannot apply.
 6. Never recurse into the wrapper. Resolve the real binary with
    `wrapper.ResolveBinary(name, nil)`; it skips the wrapper's own
    executable on PATH.

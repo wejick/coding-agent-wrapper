@@ -199,6 +199,24 @@ plugin. The user's own installed plugins, skills and commands are untouched
 and keep working. Name your plugin after the org (`acme-defaults`) so both
 can coexist.
 
+When the pack has `claude/plugin/`, the settings file also allows reads
+of the pack, so the plugin's skills can open the pack's other files
+without a prompt (in print mode a prompt would mean a denied read):
+
+```
+"allow": ["Read(//home/me/.cache/coding-agent-wrapper/git/3f2a.../**)"],
+"deny":  ["Read(//home/me/.cache/coding-agent-wrapper/git/3f2a.../.git/**)"]
+```
+
+The grant is read-only and limited to the pack. The `.git` deny keeps a
+token in the remote URL unreadable. Allow lists union, so user and
+project settings cannot remove the grant, and deny rules in `policy.json`
+or managed settings still win over it. A pack with only a plugin gets a
+settings file holding just these rules. `wr doctor` lists them in the
+launch notes. An embedding binary that does not want the grant sets
+`SkipPackRead` on the Claude adapter; the plugin still loads, and its
+skills prompt before reading pack files.
+
 ## OpenCode
 
 OpenCode merges named config sources, later sources win per key: remote

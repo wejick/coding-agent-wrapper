@@ -104,6 +104,9 @@ bounded at 3 seconds; when it runs out of time the warning falls back to
 the launch. `wrapper.Run` prints them to `Options.Stderr` (standard error
 by default) as `note: ...` lines before starting the agent.
 
+`Options.ToolTimeout` replaces the 2 second bound on each `--version`
+call, for tools with a slow cold start.
+
 `Options.SkipTools` turns the check off. `wr doctor` sets it and checks
 the tools once itself, instead of once per agent launch it prepares. It
 prints `run wr init` after a broken tool, or `cannot install: <reason>`

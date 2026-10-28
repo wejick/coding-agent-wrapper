@@ -372,7 +372,8 @@ func TestSkillsReadsSingularSkillDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(skills) != 2 || skills[0].Name != "review" || skills[1].Name != "commit-style" {
+	// Both directories are read and the result is sorted by name.
+	if len(skills) != 2 || skills[0].Name != "commit-style" || skills[1].Name != "review" {
 		t.Fatalf("skills = %+v", skills)
 	}
 }

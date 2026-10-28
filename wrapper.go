@@ -92,6 +92,9 @@ type Options struct {
 	// Callers that check them separately, such as a doctor command, set
 	// it to avoid running every tool once per launch they prepare.
 	SkipTools bool
+	// ToolTimeout bounds each tool's `--version` call; zero means
+	// tools.DefaultTimeout.
+	ToolTimeout time.Duration
 	// Stdin, Stdout and Stderr are used on platforms without in-place exec;
 	// on UNIX the child inherits the process's streams. Run also writes
 	// the launch warnings to Stderr (os.Stderr when nil).
@@ -138,8 +141,13 @@ func Prepare(ctx context.Context, opts Options) (*Launch, error) {
 	if opts.Pack == nil {
 		return nil, errors.New("wrapper: no defaults pack configured")
 	}
-	if opts.Headless != nil && opts.Headless.Prompt == "" {
-		return nil, errors.New("wrapper: headless launch needs a prompt")
+	if h := opts.Headless; h != nil {
+		if h.Prompt == "" {
+			return nil, errors.New("wrapper: headless launch needs a prompt")
+		}
+		if h.Unattended && h.PermissionMode != "" {
+			return nil, fmt.Errorf("wrapper: headless launch sets both Unattended and PermissionMode %q; set one", h.PermissionMode)
+		}
 	}
 	dir := opts.Dir
 	if dir != "" {
@@ -197,7 +205,7 @@ func toolWarnings(ctx context.Context, dir string, opts Options) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("required tools were not checked: %v", err)}
 	}
-	statuses := tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env})
+	statuses := tools.Check(ctx, reqs, tools.CheckOptions{Env: opts.Env, Timeout: opts.ToolTimeout})
 	var refused map[string]error
 	if opts.SetupCommand != "" {
 		refused = refusedInstalls(ctx, statuses, opts.Env)

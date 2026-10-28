@@ -18,15 +18,17 @@
 //	env.json           environment variables; existing environment wins
 //	                   unless policy mode is on (the default)
 //	plugin/            --plugin-dir <dir>: org skills, agents, commands
-//	                   and hooks as a Claude Code plugin
+//	                   and hooks as a Claude Code plugin, plus a Read
+//	                   allow rule for the pack
 //	system-prompt.md   --append-system-prompt-file <file>
 //
 // A headless launch (BuildOptions.Headless) adds print-mode flags after
 // the pack flags and before the user's arguments:
 //
-//	Prompt      -p <prompt>
-//	Unattended  --permission-mode bypassPermissions
-//	Model       --model <model>
+//	Prompt          -p <prompt>
+//	Unattended      --permission-mode bypassPermissions
+//	PermissionMode  --permission-mode <mode>
+//	Model           --model <model>
 //	Effort      --effort <effort>
 //
 // See docs/config-layers.md for the layering model in depth.
@@ -39,6 +41,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	wrapper "github.com/wejick/coding-agent-wrapper"
 	"github.com/wejick/coding-agent-wrapper/adapters/internal/mergedfile"
@@ -77,6 +80,9 @@ type Adapter struct {
 	ProjectDir string
 	// CacheDir overrides where merged settings are written (for tests).
 	CacheDir string
+	// SkipPackRead leaves out the Read allow rule that lets the org
+	// plugin's skills read pack files without a prompt.
+	SkipPackRead bool
 }
 
 // New returns a Claude Code adapter with defaults.
@@ -102,9 +108,17 @@ func (a *Adapter) binaryName() string {
 // above them unless o.SkipPolicy).
 func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOptions) (*wrapper.Launch, error) {
 	// The headless prompt is a bare argument, so one starting with "-"
-	// would be parsed as a flag.
-	if h := o.Headless; h != nil && (h.Prompt == "" || strings.HasPrefix(h.Prompt, "-")) {
-		return nil, fmt.Errorf("%s: headless prompt %q must be non-empty and must not start with \"-\"", DirName, h.Prompt)
+	// would be parsed as a flag; so would a permission mode.
+	if h := o.Headless; h != nil {
+		if h.Prompt == "" || strings.HasPrefix(h.Prompt, "-") {
+			return nil, fmt.Errorf("%s: headless prompt %q must be non-empty and must not start with \"-\"", DirName, h.Prompt)
+		}
+		if strings.HasPrefix(h.PermissionMode, "-") {
+			return nil, fmt.Errorf("%s: headless permission mode %q must not start with \"-\"", DirName, h.PermissionMode)
+		}
+		if h.Unattended && h.PermissionMode != "" {
+			return nil, fmt.Errorf("%s: headless launch sets both Unattended and PermissionMode %q; set one", DirName, h.PermissionMode)
+		}
 	}
 	launch := &wrapper.Launch{Notes: []string{}, Files: []string{}}
 	binary, err := a.Locate()
@@ -176,19 +190,41 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 		labels = append(labels, "org policy (locked)")
 	}
 
-	if hasDefaults || hasPolicy {
+	// Let the org plugin's skills read pack files without a prompt.
+	pluginDir, hasPlugin := p.Subdir(DirName, DirPlugin)
+	grantRead := hasPlugin && !a.SkipPackRead
+	var grant packGrant
+	if grantRead {
+		if grant, err = packReadRules(p.Dir); err != nil {
+			return nil, err
+		}
+		merged = pack.MergeJSON(merged, grant.settings(), rules)
+	}
+
+	if hasDefaults || hasPolicy || grantRead {
 		org = true
-		path, err := a.writeMergedSettings(merged)
+		settings := merged
+		if !hasDefaults && !hasPolicy {
+			// Claude Code unions permission rules across settings files.
+			settings = grant.settings()
+		}
+		path, err := a.writeMergedSettings(settings)
 		if err != nil {
 			return nil, err
 		}
 		launch.Files = append(launch.Files, path)
 		args = append(args, "--settings", path)
-		if len(labels) > 1 {
+		if len(labels) > 1 && (hasDefaults || hasPolicy) {
 			launch.Notes = append(launch.Notes, "settings layers (low → high): "+strings.Join(labels, " < "))
 		}
 		if hasPolicy {
 			launch.Notes = append(launch.Notes, fmt.Sprintf("policy %s applied over every layer (user and project settings cannot override it)", FilePolicy))
+		}
+		if grantRead {
+			launch.Notes = append(launch.Notes, fmt.Sprintf("pack files are readable without a prompt so the org plugin's skills can read them: permissions.allow gets %s (read only; deny rules still win)", strings.Join(grant.allow, ", ")))
+			if len(grant.deny) > 0 {
+				launch.Notes = append(launch.Notes, fmt.Sprintf("the pack's git metadata stays unreadable without a prompt: permissions.deny gets %s", strings.Join(grant.deny, ", ")))
+			}
 		}
 	}
 
@@ -205,10 +241,13 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	}
 
 	// 3. Org plugin: skills, agents, commands, hooks.
-	if pluginDir, ok := p.Subdir(DirName, DirPlugin); ok {
+	if hasPlugin {
 		org = true
 		args = append(args, "--plugin-dir", pluginDir)
 		launch.Notes = append(launch.Notes, fmt.Sprintf("org plugin loaded from %s", pluginDir))
+		if a.SkipPackRead {
+			launch.Notes = append(launch.Notes, "pack read access not granted (SkipPackRead); the org plugin's skills prompt before reading pack files")
+		}
 	}
 
 	// 4. System prompt append.
@@ -237,12 +276,19 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 	if h := o.Headless; h != nil {
 		args = append(args, "-p", h.Prompt)
 		launch.Notes = append(launch.Notes, fmt.Sprintf("headless: runs the prompt %q and exits (-p)", h.Prompt))
+		mode := h.PermissionMode
 		if h.Unattended {
-			args = append(args, "--permission-mode", "bypassPermissions")
-			if bypassDisabled(merged) {
-				launch.Notes = append(launch.Notes, "headless: unattended requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so tools that need permission will be denied")
-			} else {
-				launch.Notes = append(launch.Notes, "headless: unattended, permission prompts are skipped (--permission-mode bypassPermissions)")
+			mode = bypassMode
+		}
+		if mode != "" {
+			args = append(args, "--permission-mode", mode)
+			switch {
+			case mode == bypassMode && bypassDisabled(merged):
+				launch.Notes = append(launch.Notes, "headless: bypass mode requested (--permission-mode bypassPermissions), but settings set permissions.disableBypassPermissionsMode, so tools that need permission will be denied")
+			case mode == bypassMode:
+				launch.Notes = append(launch.Notes, "headless: bypass mode requested (--permission-mode bypassPermissions); managed settings, which the wrapper cannot read, may disable it, and tool calls that need permission are then denied")
+			default:
+				launch.Notes = append(launch.Notes, fmt.Sprintf("headless: permission mode %s (--permission-mode); nobody can answer a prompt, so tool calls that need a permission this mode does not grant are denied", mode))
 			}
 		}
 		if h.Model != "" {
@@ -268,6 +314,79 @@ func (a *Adapter) Build(ctx context.Context, p *pack.Pack, o wrapper.BuildOption
 func (a *Adapter) Skills(p *pack.Pack) wrapper.Skills {
 	return pack.SkillDirs{filepath.Join(p.AgentDir(DirName), DirPlugin, "skills")}
 }
+
+// packGrant holds the permission rules that make a pack readable.
+type packGrant struct {
+	allow []string
+	deny  []string
+}
+
+// settings returns the grant as a settings document.
+func (g packGrant) settings() map[string]any {
+	perms := map[string]any{"allow": toAny(g.allow)}
+	if len(g.deny) > 0 {
+		perms["deny"] = toAny(g.deny)
+	}
+	return map[string]any{"permissions": perms}
+}
+
+func toAny(list []string) []any {
+	out := make([]any, len(list))
+	for i, s := range list {
+		out[i] = s
+	}
+	return out
+}
+
+// packReadRules allows reads under dir and its symlink target, and denies
+// dir/.git, whose config can hold credentials.
+func packReadRules(dir string) (packGrant, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return packGrant{}, err
+	}
+	dirs := []string{abs}
+	if real, err := filepath.EvalSymlinks(abs); err == nil && real != abs {
+		dirs = append(dirs, real)
+	}
+	_, err = os.Stat(filepath.Join(abs, ".git"))
+	hasGit := err == nil
+	var g packGrant
+	for _, d := range dirs {
+		root := "Read(/" + strings.TrimSuffix(escapeGlob(rulePath(d)), "/")
+		g.allow = append(g.allow, root+"/**)")
+		if hasGit {
+			g.deny = append(g.deny, root+"/.git/**)")
+		}
+	}
+	return g, nil
+}
+
+// escapeGlob escapes gitignore pattern characters.
+func escapeGlob(path string) string {
+	var b strings.Builder
+	for _, r := range path {
+		if strings.ContainsRune(`\*?[]`, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// rulePath returns abs in the POSIX form permission rules match
+// (C:\Users becomes /c/Users).
+func rulePath(abs string) string {
+	if len(abs) >= 2 && abs[1] == ':' {
+		if drive := unicode.ToLower(rune(abs[0])); 'a' <= drive && drive <= 'z' {
+			abs = "/" + string(drive) + abs[2:]
+		}
+	}
+	return filepath.ToSlash(abs)
+}
+
+// bypassMode is the permission mode Headless.Unattended asks for.
+const bypassMode = "bypassPermissions"
 
 // bypassDisabled reports whether the merged settings turn off
 // bypassPermissions mode.
