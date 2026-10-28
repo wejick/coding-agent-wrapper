@@ -52,18 +52,19 @@ notes record that.
 
 ### Unreachable remotes
 
-For an SSH remote, clone and refresh run
-`ssh -o BatchMode=yes -o ConnectTimeout=10`. An unreachable remote fails
-after 10 seconds and the launch uses the cached pack, and ssh fails
-instead of waiting for input such as a new host key. A user's own
-`GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand` is used unchanged
-instead.
+For an SSH remote, clone and refresh run `ssh -o ConnectTimeout=10`. An
+unreachable remote fails after 10 seconds and the launch uses the cached
+pack. ssh can still ask the user to accept a new host key or enter a
+passphrase. A user's own `GIT_SSH_COMMAND`, `GIT_SSH` or
+`core.sshCommand` is used unchanged instead.
 
 `pack.GitOptions` changes this per source:
 
 - `ConnectTimeout` replaces the 10 seconds.
-- `Interactive` drops `BatchMode`, so ssh can ask the user to accept a
-  host key or enter a passphrase. `wr` sets it when stdin is a terminal.
+- `BatchMode` adds `-o BatchMode=yes`, so ssh fails instead of waiting
+  for input. Set it when no user is at the terminal (a CI job, a
+  headless `RunChild` loop); otherwise a prompt blocks the launch. `wr`
+  sets it when stdin is not a terminal.
 - `Env` sets the environment git runs with.
 
 HTTPS remotes have no connect timeout; bound them with a `ctx` deadline,

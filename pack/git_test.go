@@ -447,13 +447,13 @@ func readLog(t *testing.T, log string) string {
 
 const sshURL = "git@example.invalid:acme/pack.git"
 
-func TestGitCloneUsesBoundedNonInteractiveSSH(t *testing.T) {
+func TestGitCloneUsesBoundedSSH(t *testing.T) {
 	env, log := fakeSSH(t)
 	src := GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: env})
 	if _, err := src.Fetch(context.Background(), FetchOptions{}); err == nil {
 		t.Fatal("expected the clone to fail")
 	}
-	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o BatchMode=yes -o ConnectTimeout=10 ") || !strings.Contains(got, "example.invalid") {
+	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o ConnectTimeout=10 ") || !strings.Contains(got, "example.invalid") {
 		t.Fatalf("ssh was run as %q", got)
 	}
 
@@ -466,12 +466,12 @@ func TestGitCloneUsesBoundedNonInteractiveSSH(t *testing.T) {
 		t.Fatalf("ConnectTimeout should round up to whole seconds, ssh was run as %q", got)
 	}
 	env, log = fakeSSH(t)
-	src = GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: env, Interactive: true})
+	src = GitWith(sshURL, "", GitOptions{CacheDir: t.TempDir(), Env: env, BatchMode: true})
 	if _, err := src.Fetch(context.Background(), FetchOptions{}); err == nil {
 		t.Fatal("expected the clone to fail")
 	}
-	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o ConnectTimeout=10 ") {
-		t.Fatalf("Interactive should keep the timeout and drop BatchMode, ssh was run as %q", got)
+	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o BatchMode=yes -o ConnectTimeout=10 ") {
+		t.Fatalf("BatchMode should add the option and keep the timeout, ssh was run as %q", got)
 	}
 }
 
@@ -515,7 +515,7 @@ func TestGitRefreshUsesBoundedSSHAndFallsBack(t *testing.T) {
 	if err != nil || res.RefreshErr == nil || res.From != "cache" {
 		t.Fatalf("a failed refresh should fall back to the cache: res = %+v, err = %v", res, err)
 	}
-	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o BatchMode=yes -o ConnectTimeout=10 ") {
+	if got := readLog(t, log); !strings.HasPrefix(got, "ssh -o ConnectTimeout=10 ") {
 		t.Fatalf("ssh was run as %q", got)
 	}
 	if readPackFile(t, res.Dir, "v1.txt") != "one" {

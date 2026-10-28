@@ -146,8 +146,8 @@ func HeadInfo(ctx context.Context, dir string) string {
 	return out
 }
 
-// remoteEnv is g.env plus a bounded ssh command, non-interactive unless
-// g.interactive, unless the user configured their own.
+// remoteEnv is g.env plus a bounded ssh command, unless the user
+// configured their own.
 func (g gitSource) remoteEnv(ctx context.Context, dir string) []string {
 	env := g.env
 	if env == nil {
@@ -161,9 +161,9 @@ func (g gitSource) remoteEnv(ctx context.Context, dir string) []string {
 	if _, err := git(ctx, dir, env, "config", "--get", "core.sshCommand"); err == nil {
 		return env
 	}
-	ssh := "ssh -o BatchMode=yes"
-	if g.interactive {
-		ssh = "ssh"
+	ssh := "ssh"
+	if g.batchMode {
+		ssh += " -o BatchMode=yes"
 	}
 	secs := int(math.Ceil(g.connectTimeout.Seconds()))
 	return append(slices.Clip(env), fmt.Sprintf("GIT_SSH_COMMAND=%s -o ConnectTimeout=%d", ssh, secs))

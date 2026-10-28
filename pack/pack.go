@@ -112,10 +112,9 @@ type GitOptions struct {
 	// ConnectTimeout bounds ssh connects; zero means
 	// DefaultConnectTimeout. Ignored when the user sets an ssh command.
 	ConnectTimeout time.Duration
-	// Interactive lets ssh ask for input, such as accepting a new host
-	// key. Set it when a user is at the terminal; ConnectTimeout still
-	// applies.
-	Interactive bool
+	// BatchMode stops ssh from asking for input, such as accepting a new
+	// host key; it fails instead. Set it when no user is at the terminal.
+	BatchMode bool
 }
 
 // DefaultConnectTimeout is the ssh connect timeout for pack fetches.
@@ -141,7 +140,7 @@ func GitWith(url, ref string, o GitOptions) Source {
 	if timeout <= 0 {
 		timeout = DefaultConnectTimeout
 	}
-	return gitSource{url: url, ref: ref, dir: dir, sub: sub, env: o.Env, connectTimeout: timeout, interactive: o.Interactive}
+	return gitSource{url: url, ref: ref, dir: dir, sub: sub, env: o.Env, connectTimeout: timeout, batchMode: o.BatchMode}
 }
 
 type gitSource struct {
@@ -151,7 +150,7 @@ type gitSource struct {
 	sub            string
 	env            []string
 	connectTimeout time.Duration
-	interactive    bool
+	batchMode      bool
 }
 
 func (g gitSource) Describe() string {
